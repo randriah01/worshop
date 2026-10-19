@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NovaPay</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 p-8">
+  <h1 class="text-2xl font-medium mb-1">NovaPay</h1>
+  <p class="mb-6 text-slate-500 text-sm">
+    Page de test — à remplacer par le vrai dashboard React / Tailwind (pilier DEV).
+  </p>
+
+  <button id="pay" class="px-4 py-2 rounded bg-emerald-600 text-white text-sm">
+    Encaisser 4,80 € (transaction test)
+  </button>
+
+  <pre id="out" class="mt-4 p-3 bg-white rounded border text-sm text-slate-700"></pre>
+
+  <script>
+    document.getElementById('pay').onclick = async () => {
+      const out = document.getElementById('out');
+      out.textContent = 'Envoi...';
+      try {
+        const r = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ merchant: 'Le Fournil de Montmartre', amount_cents: 480 })
+        });
+        out.textContent = JSON.stringify(await r.json(), null, 2);
+      } catch (e) {
+        out.textContent = 'Erreur : ' + e;
+      }
+    };
+  </script>
+</body>
+</html>
