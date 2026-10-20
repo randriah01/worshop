@@ -10,9 +10,8 @@ services:
     environment:
       MODSEC_RULE_ENGINE: "On"
       PARANOIA: "1"
-      BACKEND: "http://payment-api:8080"
     volumes:
-      - ./infra/waf/routes.conf:/etc/nginx/conf.d/serverblock.conf:ro
+      - ./infra/waf/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
     depends_on:
       - web
       - payment-api
