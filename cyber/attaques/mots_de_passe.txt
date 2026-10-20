@@ -1,0 +1,6 @@
+123456
+password
+admin
+demo1234
+azerty
+motdepasse
