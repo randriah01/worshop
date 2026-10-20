@@ -1,22 +1,23 @@
 name: novapay
 
 services:
-  # --- Entrée réseau (reverse proxy / futur WAF) ---
+  # --- Entrée réseau (WAF ModSecurity + routage) ---
   waf:
     image: owasp/modsecurity-crs:nginx
     container_name: novapay-waf
     ports:
-     -  "80:8080"
+      - "80:8080"
     environment:
-      BACKEND: "http://payment-api:8000"
       MODSEC_RULE_ENGINE: "On"
       PARANOIA: "1"
+      BACKEND: "http://payment-api:8080"
+    volumes:
+      - ./infra/waf/routes.conf:/etc/nginx/conf.d/serverblock.conf:ro
     depends_on:
       - web
       - payment-api
       - auth-service
     networks: [novapay]
-
   # --- Développement : SI de paiement ---
   web:
     build: ./services/web
