@@ -1,0 +1,16 @@
+# WAF NovaPay — nginx + ModSecurity + OWASP CRS.
+# Rendu par l'entrée de l'image owasp/modsecurity-crs:nginx (templates).
+# Garde le routage à 3 backends et active ModSecurity (règles CRS).
+server {
+    listen 8080;
+    server_name _;
+
+    # Active le moteur WAF. Le socle ModSecurity + OWASP CRS est déjà chargé
+    # globalement par l'image (ne pas le recharger ici -> doublon de règles).
+    modsecurity on;
+
+    # Routage identique au reverse-proxy d'origine.
+    location /api/  { proxy_pass http://payment-api:8080/; }
+    location /auth/ { proxy_pass http://auth-service:8080/; }
+    location /      { proxy_pass http://web:80; }
+}

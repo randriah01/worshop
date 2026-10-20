@@ -1,0 +1,34 @@
+# ===== Secrets (JAMAIS dans le dépôt) =====
+# Avec SOPS : on commite le fichier CHIFFRÉ, jamais la clé privée ni le .env en clair.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.agekey
+age-key.txt
+keys.txt
+
+# ===== Node / Frontend =====
+node_modules/
+dist/
+.vite/
+*.local
+
+# ===== Python / services =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ===== Logs / divers =====
+*.log
+*.pid
+
+# ===== OS / éditeurs =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
