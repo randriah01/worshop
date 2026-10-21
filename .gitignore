@@ -1,0 +1,9 @@
+# Secrets - NE JAMAIS pousser
+Backend/.env
+.env
+*.key
+sops-key.txt
+
+# Dossiers temporaires
+_pycache_/
+*.pyc
