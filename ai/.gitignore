@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.env.*
+!.env.example
+*.joblib
+*.pkl
+models/*
+!models/.gitkeep
+# Les jeux synthetiques sont generables uniquement pour les tests unitaires
+data/normal_train.csv
+data/normal_test.csv
+data/incident_test.csv
+# Captures brutes d'exploitation, non versionnees par defaut
+data/novapay_normal_raw.csv
+data/novapay_normal_test.csv
+data/attack_*.csv

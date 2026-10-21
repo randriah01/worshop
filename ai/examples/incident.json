@@ -1,0 +1,9 @@
+{
+  "service": "payment-api",
+  "observed_at": "2026-10-19T14:01:00Z",
+  "window_seconds": 60,
+  "requests_per_second": 170.0,
+  "error_rate": 0.35,
+  "latency_p95_ms": 2400.0,
+  "cpu_usage_percent": 92.0
+}
