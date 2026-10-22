@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from langchain_community.vectorstores import FAISS
@@ -36,6 +37,17 @@ SYSTEM = (
 )
 
 app = FastAPI(title="NovaPay — Assistant RAG (lecture seule)")
+
+# CORS : permet au front (sur la VM1) d'appeler cette API (sur la VM2) depuis le
+# navigateur. Démo : toutes origines. Prod : restreindre via CORS_ORIGINS
+# (ex. CORS_ORIGINS="http://192.168.1.10,http://novapay.local").
+_origins = os.environ.get("CORS_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _origins == "*" else [o.strip() for o in _origins.split(",")],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 _embeddings = OllamaEmbeddings(model=EMB_MODEL, base_url=OLLAMA_URL)
 _llm = ChatOllama(model=LLM_MODEL, temperature=0.1, base_url=OLLAMA_URL)
