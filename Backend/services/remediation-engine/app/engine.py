@@ -53,9 +53,11 @@ RESTART_WINDOW = float(os.getenv("REMEDIATION_RESTART_WINDOW", "600"))
 # --- Remédiation « limitation de débit » (DDoS) ----------------------------
 RATE_OK = float(os.getenv("REMEDIATION_RATE_OK", "15"))          # req/s considérés « normaux »
 RATE_WINDOW = float(os.getenv("REMEDIATION_RATE_WINDOW", "5"))   # s par mesure de débit
-RL_BURST = int(os.getenv("REMEDIATION_RATELIMIT_BURST", "20"))   # rafale tolérée par IP
+RL_BURST = int(os.getenv("REMEDIATION_RATELIMIT_BURST", "20"))   # rafale tolérée, trafic anonyme (par IP)
+RL_BURST_AUTH = int(os.getenv("REMEDIATION_RATELIMIT_BURST_AUTH", "40"))  # rafale tolérée, utilisateur connecté (par jeton)
 RL_HOLD = float(os.getenv("REMEDIATION_RATELIMIT_HOLD", "180"))  # s de maintien avant levée
-RL_ZONE = os.getenv("REMEDIATION_RATELIMIT_ZONE", "novapay_perip")  # définie dans infra/waf
+RL_ZONE_ANON = "novapay_anon"   # zones définies dans infra/waf/ratelimit-zone.conf
+RL_ZONE_AUTH = "novapay_auth"
 RL_DIR = Path(os.getenv("WAF_DYNAMIC_DIR", "/waf-dynamic"))
 RL_FILE = RL_DIR / "ratelimit.inc"      # inclus par le WAF (glob *.inc) : présent = limitation active
 RL_TMP = RL_DIR / "ratelimit.inc.tmp"   # ne matche pas *.inc → jamais lu à moitié par nginx
@@ -198,7 +200,8 @@ def _rl_content():
     return (
         "# Généré par remediation-engine — mitigation DDoS temporaire.\n"
         "# Supprimer ce fichier + recharger le WAF = limitation levée.\n"
-        f"limit_req zone={RL_ZONE} burst={RL_BURST} nodelay;\n"
+        f"limit_req zone={RL_ZONE_ANON} burst={RL_BURST} nodelay;\n"
+        f"limit_req zone={RL_ZONE_AUTH} burst={RL_BURST_AUTH} nodelay;\n"
         "limit_req_status 429;\n"
     )
 
@@ -239,7 +242,7 @@ def enable_rate_limit():
         log(f"Impossible d'écrire la limitation ({RL_DIR}) : {e}")
         return False
     if reload_waf():
-        log(f"Action : limitation de débit ACTIVÉE sur le WAF (rafale {RL_BURST}, maintien {int(RL_HOLD)} s).")
+        log(f"Action : limitation de débit ACTIVÉE sur le WAF (rafale {RL_BURST} anonyme / {RL_BURST_AUTH} connecté, maintien {int(RL_HOLD)} s).")
         return True
     RL_FILE.unlink(missing_ok=True)     # on ne laisse jamais une config non appliquée
     return False
