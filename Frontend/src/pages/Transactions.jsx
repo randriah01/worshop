@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react";
-import { getTransactions, createTransaction } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { getTransactions, createTransaction, isTransientError } from "../api";
 import { Card, StatusBadge, Spinner, ErrorNote, euros, dateFr } from "../components/ui";
 import { Header } from "./Dashboard";
 
 const PAGE = 10;
+
+// Nouvelles tentatives automatiques d'un paiement refusé pour cause passagère
+// (API saturée par une attaque, en reprise, limitation de débit…). On insiste
+// jusqu'à RETRY_WINDOW_MS : assez pour que la détection + la remédiation agissent.
+// Attentes : 2 s, 4 s, 8 s puis 10 s (± 25 % pour ne pas tirer tous en même temps).
+const RETRY_WINDOW_MS = 180000;
+const RETRY_BASE_MS = 2000;
+const RETRY_MAX_DELAY_MS = 10000;
 
 export default function Transactions() {
   const [all, setAll] = useState([]);
@@ -219,6 +227,9 @@ function Checkout({ onPaid }) {
   // Clé d'idempotence : une par paiement. Un double-clic ou un renvoi réutilise
   // la même clé → le serveur ne crée pas de doublon.
   const [idemKey, setIdemKey] = useState(() => newKey());
+  const [retryInfo, setRetryInfo] = useState(null); // { n } pendant une relance auto
+  const cancelRef = useRef(false);
+  const keyCents = useRef(null); // montant associé à la clé courante
 
   const brand = cardBrand(number);
   const cents = Math.round(parseFloat((amount || "").replace(",", ".")) * 100);
@@ -246,22 +257,57 @@ function Checkout({ onPaid }) {
     ev.preventDefault();
     if (!validate()) return;
     setStage("processing");
+    setRetryInfo(null);
+
+    // Même clé pour tous les envois d'UN paiement ; si le montant change, c'est
+    // un autre paiement → nouvelle clé (sinon le serveur renverrait l'ancien).
+    let key = idemKey;
+    if (keyCents.current !== null && keyCents.current !== cents) {
+      key = newKey();
+      setIdemKey(key);
+    }
+    keyCents.current = cents;
+
     // Petit délai pour simuler le traitement par la banque.
     await new Promise((r) => setTimeout(r, 1000));
 
-    try {
-      // Toute carte valide est acceptée. Un échec ne survient qu'en cas de
-      // problème réel côté serveur (ex. plateforme sous attaque).
-      // Seul le montant part au serveur — JAMAIS les données de carte.
-      // La clé d'idempotence évite les doublons si la requête part deux fois.
-      const r = await createTransaction(cents, idemKey);
-      setResult(r);
-      setStage("success");
-      onPaid();
-    } catch (err) {
-      setResult({ reason: err.message });
+    // Seul le montant part au serveur — JAMAIS les données de carte.
+    // Toute carte valide est acceptée : un échec ne survient qu'en cas de
+    // problème réel côté serveur (ex. plateforme sous attaque). On réessaie
+    // alors automatiquement avec LA MÊME clé d'idempotence : si le premier envoi
+    // est en fait passé, le serveur renvoie la transaction existante au lieu de
+    // débiter une seconde fois.
+    const deadline = Date.now() + RETRY_WINDOW_MS;
+    cancelRef.current = false;
+    const fail = (reason, retried) => {
+      setResult({ reason, retried });
       setStage("declined");
+      setRetryInfo(null);
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const r = await createTransaction(cents, key);
+        setResult({ ...r, retried: attempt });
+        setStage("success");
+        setRetryInfo(null);
+        onPaid();
+        return;
+      } catch (err) {
+        if (cancelRef.current) return fail("Paiement annulé. Vérifie l'historique avant de réessayer.", attempt);
+        if (Date.now() >= deadline || !isTransientError(err)) return fail(err.message, attempt);
+        setRetryInfo({ n: attempt + 1 });
+        const wait = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_DELAY_MS) * (0.75 + Math.random() * 0.5);
+        await new Promise((r) => setTimeout(r, wait));
+        if (cancelRef.current) return fail("Paiement annulé. Vérifie l'historique avant de réessayer.", attempt + 1);
+      }
     }
+  }
+
+  // Retour au formulaire en CONSERVANT la saisie et la clé d'idempotence :
+  // un refus peut cacher un paiement passé, une nouvelle clé risquerait un doublon.
+  function backToForm() {
+    setResult(null);
+    setStage("form");
   }
 
   function reset() {
@@ -272,6 +318,7 @@ function Checkout({ onPaid }) {
     setErrors({});
     setResult(null);
     setStage("form");
+    keyCents.current = null;
     setIdemKey(newKey()); // nouveau paiement = nouvelle clé
   }
 
@@ -281,7 +328,22 @@ function Checkout({ onPaid }) {
         <div className="flex flex-col items-center gap-3 py-12">
           <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--border)] border-t-blue-400" />
           <p className="text-[var(--text-soft)]">Traitement du paiement…</p>
-          <p className="text-xs text-[var(--text-faint)]">Vérification auprès de la banque (simulée)</p>
+          {retryInfo ? (
+            <>
+              <p className="text-xs text-amber-400">
+                Service momentanément indisponible — nouvelle tentative automatique n°{retryInfo.n} (jusqu'à 3 min)…
+              </p>
+              <button
+                type="button"
+                onClick={() => { cancelRef.current = true; }}
+                className="mt-1 rounded-lg border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-soft)] hover:bg-[var(--panel-2)]"
+              >
+                Annuler
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-[var(--text-faint)]">Vérification auprès de la banque (simulée)</p>
+          )}
         </div>
       </Card>
     );
@@ -297,6 +359,11 @@ function Checkout({ onPaid }) {
           <p className="text-sm text-[var(--text-faint)]">
             Transaction #{result?.id} · nouveau solde commerçant {euros(result?.new_balance_cents)}
           </p>
+          {result?.retried > 0 && (
+            <p className="text-xs text-emerald-400">
+              Validé automatiquement après {result.retried} nouvelle(s) tentative(s), sans double débit.
+            </p>
+          )}
           <button
             onClick={reset}
             className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
@@ -315,8 +382,13 @@ function Checkout({ onPaid }) {
           <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500/15 text-3xl text-red-400">✕</span>
           <h2 className="text-lg font-semibold text-[var(--text)]">Paiement refusé</h2>
           <p className="max-w-sm text-sm text-[var(--text-muted)]">{result?.reason}</p>
+          {result?.retried > 0 && (
+            <p className="max-w-sm text-xs text-[var(--text-faint)]">
+              {result.retried} nouvelle(s) tentative(s) automatique(s) sans succès. Aucun double débit possible : le même paiement est renvoyé avec la même clé.
+            </p>
+          )}
           <button
-            onClick={reset}
+            onClick={backToForm}
             className="mt-3 rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-2)]"
           >
             Réessayer
