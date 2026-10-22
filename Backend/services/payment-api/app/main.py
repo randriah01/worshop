@@ -2,6 +2,7 @@ import json
 import time
 import logging
 
+import psycopg2
 from fastapi import FastAPI, Depends, HTTPException, Request, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Histogram, Gauge, make_asgi_app
@@ -85,13 +86,51 @@ def me(user=Depends(current_merchant)):
         db.put_conn(conn)
 
 
+def _existing_tx(cur, merchant_id, key):
+    """Retourne la transaction déjà créée pour cette clé d'idempotence, ou None."""
+    cur.execute(
+        "SELECT id, status FROM transactions "
+        "WHERE merchant_id = %s AND idempotency_key = %s",
+        (merchant_id, key),
+    )
+    return cur.fetchone()
+
+
+def _balance(cur, merchant_id):
+    cur.execute("SELECT balance_cents FROM merchants WHERE id = %s", (merchant_id,))
+    r = cur.fetchone()
+    return r[0] if r else 0
+
+
 @app.post("/transactions")
-def create_tx(tx: TxIn, user=Depends(current_merchant)):
-    """Encaisse une transaction pour le commerce du compte connecté."""
+def create_tx(
+    tx: TxIn,
+    user=Depends(current_merchant),
+    idempotency_key: str = Header(default=None, alias="Idempotency-Key"),
+):
+    """Encaisse une transaction pour le commerce du compte connecté.
+
+    Idempotence : si l'en-tête Idempotency-Key a déjà été traité pour ce
+    commerçant, on renvoie la transaction existante sans en créer une nouvelle
+    ni recréditer le solde (protège contre les doublons en cas de renvoi)."""
     merchant_id = user["merchant_id"]
     conn = db.get_conn()
     try:
         cur = conn.cursor()
+
+        # 1) Rejeu : la clé a déjà été traitée → on renvoie l'existant.
+        if idempotency_key:
+            existing = _existing_tx(cur, merchant_id, idempotency_key)
+            if existing:
+                bal = _balance(cur, merchant_id)
+                cur.close()
+                return {
+                    "id": existing[0], "status": existing[1],
+                    "merchant_id": merchant_id, "new_balance_cents": bal,
+                    "idempotent_replay": True,
+                }
+
+        # 2) Traitement normal : crédit du solde + enregistrement, atomiques.
         cur.execute(
             "UPDATE merchants SET balance_cents = balance_cents + %s "
             "WHERE id = %s RETURNING balance_cents",
@@ -103,9 +142,9 @@ def create_tx(tx: TxIn, user=Depends(current_merchant)):
             TX.labels("rejected").inc()
             raise HTTPException(status_code=404, detail="Commerçant inconnu")
         cur.execute(
-            "INSERT INTO transactions (merchant_id, amount_cents, status) "
-            "VALUES (%s, %s, 'validated') RETURNING id",
-            (merchant_id, tx.amount_cents),
+            "INSERT INTO transactions (merchant_id, amount_cents, status, idempotency_key) "
+            "VALUES (%s, %s, 'validated', %s) RETURNING id",
+            (merchant_id, tx.amount_cents, idempotency_key),
         )
         tx_id = cur.fetchone()[0]
         conn.commit()
@@ -113,6 +152,22 @@ def create_tx(tx: TxIn, user=Depends(current_merchant)):
         TX.labels("validated").inc()
         AMT.observe(tx.amount_cents)
         return {"id": tx_id, "status": "validated", "merchant_id": merchant_id, "new_balance_cents": row[0]}
+
+    except psycopg2.errors.UniqueViolation:
+        # Deux requêtes identiques en parallèle : la 2e est rejetée par l'index
+        # unique. On annule et on renvoie la transaction déjà créée.
+        conn.rollback()
+        cur = conn.cursor()
+        existing = _existing_tx(cur, merchant_id, idempotency_key)
+        bal = _balance(cur, merchant_id)
+        cur.close()
+        if existing:
+            return {
+                "id": existing[0], "status": existing[1],
+                "merchant_id": merchant_id, "new_balance_cents": bal,
+                "idempotent_replay": True,
+            }
+        raise HTTPException(status_code=409, detail="Conflit d'idempotence")
     except HTTPException:
         raise
     except Exception as e:
