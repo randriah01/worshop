@@ -1,0 +1,25 @@
+# WAF NovaPay — nginx + ModSecurity + OWASP CRS.
+server {
+    listen 8080;
+    server_name _;
+    modsecurity on;
+
+    # Mitigations dynamiques déposées par le remediation-engine (ex. limitation
+    # de débit en cas de DDoS). Le glob n'échoue pas s'il n'y a aucun fichier :
+    # dossier vide = aucune mitigation active.
+    include /etc/nginx/dynamic/*.inc;
+
+    # Délais courts : si l'API est saturée, le client reçoit vite une erreur et
+    # peut réessayer (au lieu d'attendre 60 s un 504).
+    location /api/  {
+        proxy_pass http://payment-api:8080/;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 15s;
+    }
+    location /auth/ {
+        proxy_pass http://auth-service:8080/;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 15s;
+    }
+    location /      { proxy_pass http://web:80; }
+}
