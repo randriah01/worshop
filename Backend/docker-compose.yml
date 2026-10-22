@@ -112,12 +112,18 @@ services:
       - loki
     networks: [novapay]
 
-  # --- IA/Data et Remédiation : à activer quand les composants sont prêts ---
-  # ml-detector:
-  #   build: ./services/ml-detector
-  #   container_name: novapay-ml
-  #   networks: [novapay]
-  #
+  # --- IA/Data : détection d'anomalies ---
+  ml-detector:
+    build: ./services/ml-detector
+    container_name: novapay-ml
+    environment:
+      PAYMENT_API: http://payment-api:8080
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+    depends_on:
+      - payment-api
+    networks: [novapay]
+
+  # --- Remédiation : à activer quand le composant est prêt ---
   # remediation-engine:
   #   build: ./services/remediation-engine
   #   container_name: novapay-remediation
