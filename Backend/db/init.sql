@@ -20,16 +20,24 @@ CREATE TABLE IF NOT EXISTS merchant_users (
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
-  id           SERIAL PRIMARY KEY,
-  merchant_id  INTEGER NOT NULL REFERENCES merchants(id),
-  amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-  status       TEXT NOT NULL DEFAULT 'pending'
-               CHECK (status IN ('pending', 'validated', 'rejected', 'error')),
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  id              SERIAL PRIMARY KEY,
+  merchant_id     INTEGER NOT NULL REFERENCES merchants(id),
+  amount_cents    BIGINT NOT NULL CHECK (amount_cents > 0),
+  status          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'validated', 'rejected', 'error')),
+  idempotency_key TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_tx_merchant ON transactions(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions(status);
+
+-- Idempotence : une même clé ne peut créer qu'une seule transaction par
+-- commerçant. Une requête répétée (double-clic, renvoi réseau) ne crée donc
+-- pas de doublon.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_idempotency
+  ON transactions(merchant_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS incidents (
   id          SERIAL PRIMARY KEY,
