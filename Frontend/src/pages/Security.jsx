@@ -6,9 +6,22 @@ import { Header } from "./Dashboard";
 // Gravité déduite du type d'incident (le backend ne la stocke pas encore).
 function severity(kind = "") {
   const k = kind.toLowerCase();
-  if (k.includes("injection") || k.includes("sql") || k.includes("exfil")) return "critique";
-  if (k.includes("dos") || k.includes("flood") || k.includes("ddos")) return "élevé";
-  if (k.includes("latence") || k.includes("latency") || k.includes("error")) return "moyen";
+  if (
+    k.includes("injection") || k.includes("sql") || k.includes("exfil") ||
+    k.includes("indispo") || k.includes("panne") || k.includes("down") ||
+    k.includes("base de données")
+  )
+    return "critique";
+  if (
+    k.includes("dos") || k.includes("flood") || k.includes("ddos") ||
+    k.includes("trafic") || k.includes("déni") || k.includes("deni") || k.includes("pic")
+  )
+    return "élevé";
+  if (
+    k.includes("latence") || k.includes("latency") ||
+    k.includes("error") || k.includes("erreur") || k.includes("timeout")
+  )
+    return "moyen";
   if (k) return "faible";
   return "information";
 }
