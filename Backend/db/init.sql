@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS incidents (
   kind        TEXT NOT NULL,
   detail      TEXT,
   status      TEXT NOT NULL DEFAULT 'open'
-              CHECK (status IN ('open', 'resolved')),
+              CHECK (status IN ('open', 'resolved', 'escalated')),
+  action      TEXT,                              -- action de remédiation appliquée
+  attempts    INTEGER NOT NULL DEFAULT 0,        -- nombre de tentatives
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at TIMESTAMPTZ
 );
