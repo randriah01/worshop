@@ -1,0 +1,9 @@
+# Assistant RAG NovaPay — Ollama + LangChain (lecture seule)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+langchain-core>=0.3
+langchain-community>=0.3
+langchain-ollama>=0.2
+langchain-text-splitters>=0.3
+faiss-cpu>=1.8
