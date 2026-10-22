@@ -1,0 +1,5 @@
+# Artefacts générés — ne pas versionner
+index/          # index vectoriel FAISS (reconstruit par ingest.py)
+.venv/          # environnement Python local
+__pycache__/
+*.pyc
