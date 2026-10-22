@@ -131,7 +131,6 @@ services:
   #   build: ./services/remediation-engine
   #   container_name: novapay-remediation
   #   networks: [novapay]
-  # code
 
 volumes:
   pgdata:
