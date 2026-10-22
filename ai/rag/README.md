@@ -22,11 +22,19 @@ L'assistant parle à un serveur Ollama via son API HTTP (port `11434`). Deux cas
   ```
   Côté VM2, Ollama doit écouter sur le réseau (et pas seulement `127.0.0.1`) :
   `OLLAMA_HOST=0.0.0.0:11434`, et le port 11434 ouvert vers le poste.
-- **Local** — rien à configurer, défaut `http://localhost:11434`.
+- **Local** — rien à configurer, défaut `http://127.0.0.1:11434`
+  (on utilise `127.0.0.1` et non `localhost` pour éviter la résolution IPv6
+  sous Windows, qui peut faire traîner/bloquer la connexion à Ollama).
+
+## Prérequis Python
+**`faiss-cpu` ne supporte pas encore Python ≥ 3.15.** Crée le venv avec
+**Python 3.12** (`py -3.12 -m venv .venv`). Si besoin :
+`winget install -e --id Python.Python.3.12`. Le script `deploy_vm2.ps1` le fait
+automatiquement s'il détecte 3.12.
 
 ## Installation / déploiement sur la VM2
 L'assistant est déployé **sur la VM2**, à côté d'Ollama (pas d'accès réseau à
-sortir : il parle à Ollama en `localhost:11434`). Scripts clé en main :
+sortir : il parle à Ollama en `127.0.0.1:11434`). Scripts clé en main :
 - **VM2 Windows** : `.\deploy_vm2.ps1` (PowerShell)
 - **Linux** : `bash deploy_vm2.sh`
 

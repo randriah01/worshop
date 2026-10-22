@@ -20,7 +20,8 @@ REPO = Path(__file__).resolve().parents[2]          # racine du dépôt
 INDEX_DIR = Path(__file__).parent / "index"
 EMB_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 # Ollama distant (VM2 ESXi) ou local ; surcharge via OLLAMA_BASE_URL.
-OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+# 127.0.0.1 (et non localhost) pour éviter la résolution IPv6 sous Windows.
+OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 # Documentation du projet à indexer (la connaissance de l'assistant).
 DOC_GLOBS = [
@@ -29,12 +30,17 @@ DOC_GLOBS = [
     "Backend/**/*.md",
     "Frontend/README.md",
 ]
+# Dossiers à ignorer : on n'indexe JAMAIS les .md des dépendances (venv, etc.),
+# sinon l'index se pollue avec les LICENSE/README des paquets installés.
+EXCLUDE = (".venv", "site-packages", "node_modules", ".git", "__pycache__")
 
 
 def load_docs() -> list[Document]:
     docs, seen = [], set()
     for pattern in DOC_GLOBS:
         for path in REPO.glob(pattern):
+            if any(part in EXCLUDE for part in path.parts):
+                continue
             if path.is_file() and path.suffix == ".md" and path not in seen:
                 seen.add(path)
                 text = path.read_text(encoding="utf-8", errors="ignore").strip()

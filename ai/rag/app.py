@@ -24,7 +24,8 @@ INDEX_DIR = Path(__file__).parent / "index"
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen2.5:3b")
 EMB_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 # Ollama distant (VM2 ESXi) ou local ; surcharge via OLLAMA_BASE_URL.
-OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+# 127.0.0.1 (et non localhost) pour éviter la résolution IPv6 sous Windows.
+OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 SYSTEM = (
     "Tu es l'assistant documentaire du projet NovaPay / RESILIENCE-ALPHA. "
