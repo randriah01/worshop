@@ -1,0 +1,148 @@
+name: novapay
+
+services:
+  # --- Entrée réseau (reverse proxy / futur WAF) ---
+  waf:
+    image: nginx:alpine
+    container_name: novapay-waf
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/waf/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - payment-api
+      - auth-service
+    networks: [novapay]
+
+  # --- Développement : SI de paiement ---
+  # Dashboard React (dossier ../Frontend), construit puis servi par nginx.
+  web:
+    build:
+      context: ../Frontend
+    container_name: novapay-web
+    networks: [novapay]
+
+  payment-api:
+    build: ./services/payment-api
+    container_name: novapay-payment-api
+    environment:
+      DB_HOST: postgres
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [novapay]
+
+  auth-service:
+    build: ./services/auth-service
+    container_name: novapay-auth
+    environment:
+      DB_HOST: postgres
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_LOGIN: ${ADMIN_LOGIN}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [novapay]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: novapay-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [novapay]
+
+  # --- Infrastructure : observabilité ---
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: novapay-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks: [novapay]
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: novapay-loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./infra/observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+    networks: [novapay]
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: novapay-promtail
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./infra/observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [novapay]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: novapay-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+    depends_on:
+      - prometheus
+      - loki
+    networks: [novapay]
+
+  # --- IA/Data : détection d'anomalies ---
+  ml-detector:
+    build: ./services/ml-detector
+    container_name: novapay-ml
+    environment:
+      PAYMENT_API: http://payment-api:8080
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+    depends_on:
+      - payment-api
+    networks: [novapay]
+
+  # --- Remédiation automatique ---
+  # Le socket Docker lui permet de relancer le service de paiement.
+  # Privilège élevé, volontairement limité à une liste blanche (voir le code).
+  remediation-engine:
+    build: ./services/remediation-engine
+    container_name: novapay-remediation
+    environment:
+      PAYMENT_API: http://payment-api:8080
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      TARGET_CONTAINER: novapay-payment-api
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - payment-api
+    networks: [novapay]
+
+volumes:
+  pgdata:
+  lokidata:
+
+networks:
+  novapay:
+    driver: bridge
