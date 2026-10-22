@@ -197,6 +197,16 @@ function formatExpiry(value) {
   return v.slice(0, 2) + "/" + v.slice(2);
 }
 
+// Génère une clé d'idempotence unique (UUID si disponible, sinon repli).
+function newKey() {
+  try {
+    if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  } catch {
+    /* ignore */
+  }
+  return "k-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+
 function Checkout({ onPaid }) {
   const [amount, setAmount] = useState("24.90");
   const [number, setNumber] = useState("");
@@ -206,6 +216,9 @@ function Checkout({ onPaid }) {
   const [errors, setErrors] = useState({});
   const [stage, setStage] = useState("form"); // form | processing | success | declined
   const [result, setResult] = useState(null);
+  // Clé d'idempotence : une par paiement. Un double-clic ou un renvoi réutilise
+  // la même clé → le serveur ne crée pas de doublon.
+  const [idemKey, setIdemKey] = useState(() => newKey());
 
   const brand = cardBrand(number);
   const cents = Math.round(parseFloat((amount || "").replace(",", ".")) * 100);
@@ -240,7 +253,8 @@ function Checkout({ onPaid }) {
       // Toute carte valide est acceptée. Un échec ne survient qu'en cas de
       // problème réel côté serveur (ex. plateforme sous attaque).
       // Seul le montant part au serveur — JAMAIS les données de carte.
-      const r = await createTransaction(cents);
+      // La clé d'idempotence évite les doublons si la requête part deux fois.
+      const r = await createTransaction(cents, idemKey);
       setResult(r);
       setStage("success");
       onPaid();
@@ -258,6 +272,7 @@ function Checkout({ onPaid }) {
     setErrors({});
     setResult(null);
     setStage("form");
+    setIdemKey(newKey()); // nouveau paiement = nouvelle clé
   }
 
   if (stage === "processing") {
