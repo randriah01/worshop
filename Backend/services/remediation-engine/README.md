@@ -1,25 +1,48 @@
 # remediation-engine — Moteur de remédiation (pilier Développement)
 
-Composant à développer sur la branche `feature/dev`.
+Reprise automatique de NovaPay : lit les incidents ouverts (créés par la
+détection), applique une action corrective, vérifie que le service remarche
+vraiment, puis marque l'incident **résolu** — ou l'**escalade** si la reprise
+échoue.
 
-## Rôle
-Recevoir l'alerte de détection, décider de l'action corrective, l'exécuter
-automatiquement, puis vérifier le retour à un état utilisable (une nouvelle
-transaction doit passer). C'est le cœur de la « reprise sans intervention ».
+## Le cycle
 
-Exemples d'actions : bloquer une IP au niveau du WAF, relancer proprement
-un service, isoler un composant compromis.
+1. Lit les incidents `open` (`GET /incidents`).
+2. Décide une action **autorisée** (règle déterministe, pas d'IA).
+3. Exécute l'action : relance proprement le conteneur `payment-api`.
+4. **Vérifie la reprise** : interroge `/health` jusqu'à deux réponses OK
+   consécutives. Un incident n'est jamais déclaré résolu juste parce qu'une
+   commande a tourné.
+5. **Résout** (`POST /incidents/{id}/resolve`) si la vérification réussit,
+   sinon **escalade** (`POST /incidents/{id}/escalate`) après N tentatives.
 
-## Attention (sécurité)
-Ce service peut avoir des droits élevés sur les conteneurs : c'est le composant
-le plus sensible. Ne lui donner que les permissions strictement nécessaires,
-pas un accès d'administration ouvert à tout.
+## Sécurité (moindre privilège)
 
-## À produire ici
-- `Dockerfile`, `requirements.txt`, `app/`
-- la logique de décision et les playbooks / actions de reprise
-- les vérifications post-reprise
+- Le moteur ne peut faire QUE les actions d'une **liste blanche** : relancer un
+  conteneur précis (`TARGET_CONTAINER`). Rien d'autre, aucune commande libre.
+- Il a besoin du **socket Docker** (`/var/run/docker.sock`) pour relancer un
+  service — c'est le composant « à privilèges élevés » du projet, volontairement
+  restreint. À présenter au jury comme tel.
+- Il est distinct de l'assistant IA, qui lui n'a **aucun** droit d'action.
 
-## Activation
-Décommenter le service `remediation-engine` dans `docker-compose.yml`
-quand le composant est prêt.
+## Réglages (variables d'environnement)
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `TARGET_CONTAINER` | novapay-payment-api | conteneur autorisé à la relance |
+| `REMEDIATION_POLL_SECONDS` | 5 | fréquence de lecture des incidents |
+| `REMEDIATION_MAX_ATTEMPTS` | 2 | nombre de tentatives avant escalade |
+| `REMEDIATION_HEALTH_TIMEOUT` | 40 | fenêtre de vérification de la reprise (s) |
+
+## Suivre son activité
+
+```bash
+docker compose logs -f remediation-engine
+```
+
+## Limite connue
+
+Le moteur passe par `payment-api` pour lire et mettre à jour les incidents. Si
+`payment-api` est **totalement** hors service, il ne peut plus communiquer : la
+remédiation vise donc les dégradations (déni de service, pic d'erreurs) où le
+service répond encore partiellement, pas une panne matérielle totale.
