@@ -48,6 +48,7 @@ const STATUS_STYLES = {
   error: "bg-red-500/15 text-red-400 border-red-500/30",
   open: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   resolved: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  escalated: "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
 const STATUS_LABELS = {
@@ -57,6 +58,7 @@ const STATUS_LABELS = {
   error: "Erreur",
   open: "Ouvert",
   resolved: "Résolu",
+  escalated: "Escaladé",
 };
 
 export function StatusBadge({ status }) {
