@@ -12,6 +12,10 @@ services:
       PARANOIA: "1"
     volumes:
       - ./infra/waf/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
+      # Zone de limitation de débit (toujours déclarée, appliquée à la demande).
+      - ./infra/waf/ratelimit-zone.conf:/etc/nginx/conf.d/00-ratelimit-zone.conf:ro
+      # Mitigations dynamiques écrites par le remediation-engine (lecture seule ici).
+      - waf_dynamic:/etc/nginx/dynamic:ro
     depends_on:
       - web
       - payment-api
@@ -127,7 +131,8 @@ services:
     networks: [novapay]
 
   # --- Remédiation automatique ---
-  # Le socket Docker lui permet de relancer le service de paiement.
+  # Le socket Docker lui permet de relancer le service de paiement et de
+  # recharger le WAF (limitation de débit en cas de DDoS).
   # Privilège élevé, volontairement limité à une liste blanche (voir le code).
   remediation-engine:
     build: ./services/remediation-engine
@@ -136,15 +141,20 @@ services:
       PAYMENT_API: http://payment-api:8080
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       TARGET_CONTAINER: novapay-payment-api
+      WAF_CONTAINER: novapay-waf
+      WAF_DYNAMIC_DIR: /waf-dynamic
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - waf_dynamic:/waf-dynamic
     depends_on:
       - payment-api
+      - waf
     networks: [novapay]
 
 volumes:
   pgdata:
   lokidata:
+  waf_dynamic:
 
 networks:
   novapay:
