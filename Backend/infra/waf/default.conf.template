@@ -16,7 +16,15 @@ server {
         proxy_connect_timeout 5s;
         proxy_read_timeout 15s;
     }
+    # Les modèles faciaux peuvent prendre plusieurs secondes sur CPU.
+    location /auth/face/ {
+        client_max_body_size 3m;
+        proxy_pass http://auth-service:8080/face/;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 120s;
+    }
     location /auth/ {
+        client_max_body_size 3m; # trois petites images JPEG encodées
         proxy_pass http://auth-service:8080/;
         proxy_connect_timeout 5s;
         proxy_read_timeout 15s;

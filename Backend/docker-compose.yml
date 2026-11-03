@@ -10,12 +10,14 @@ services:
     environment:
       MODSEC_RULE_ENGINE: "On"
       PARANOIA: "1"
+      MODSEC_REQ_BODY_NOFILES_LIMIT: "1048576"
     volumes:
       - ./infra/waf/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
       # Zone de limitation de débit (toujours déclarée, appliquée à la demande).
       - ./infra/waf/ratelimit-zone.conf:/etc/nginx/conf.d/00-ratelimit-zone.conf:ro
       # Mitigations dynamiques écrites par le remediation-engine (lecture seule ici).
       - waf_dynamic:/etc/nginx/dynamic:ro
+      - ./infra/waf/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
     depends_on:
       - web
       - payment-api
@@ -40,9 +42,21 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      FACE_LOGIN_REQUIRED: ${FACE_LOGIN_REQUIRED:-false}
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [novapay]
+
+  # Reconnaissance faciale et anti-spoofing (interne, sans port hôte).
+  face-ai:
+    build: ./services/face-ai
+    container_name: novapay-face-ai
+    environment:
+      FACE_INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      TF_CPP_MIN_LOG_LEVEL: "2"
+    volumes:
+      - faceweights:/root/.deepface/weights
     networks: [novapay]
 
   auth-service:
@@ -56,6 +70,12 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_LOGIN: ${ADMIN_LOGIN}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      FACE_INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      FACE_AI_URL: http://face-ai:8080
+      FACE_ENCRYPTION_KEY: ${FACE_ENCRYPTION_KEY:-}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-}
+      FACE_LOGIN_REQUIRED: ${FACE_LOGIN_REQUIRED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,6 +175,7 @@ volumes:
   pgdata:
   lokidata:
   waf_dynamic:
+  faceweights:
 
 networks:
   novapay:

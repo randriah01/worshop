@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+deepface==0.0.103
+opencv-python-headless>=4.9,<5
+numpy>=1.26,<3
+
+Werkzeug>=3.0,<4.0

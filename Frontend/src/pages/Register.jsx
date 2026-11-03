@@ -26,8 +26,8 @@ export default function Register({ onSuccess, onLogin }) {
     }
     setLoading(true);
     try {
-      await register(loginName.trim(), password, shopName.trim());
-      onSuccess();
+      const result = await register(loginName.trim(), password, shopName.trim());
+      onSuccess(result);
     } catch (err) {
       setError(err.message || "Inscription impossible.");
     } finally {

@@ -3,6 +3,26 @@
 // En production, le dashboard est servi derrière le même proxy : même origine.
 
 const TOKEN_KEY = "novapay_token";
+const SETUP_TOKEN_KEY = "novapay_setup_token";
+const SETUP_LOGIN_KEY = "novapay_setup_login";
+
+export function getSetupToken() {
+  try { return sessionStorage.getItem(SETUP_TOKEN_KEY); } catch { return null; }
+}
+export function getSetupLogin() {
+  try { return sessionStorage.getItem(SETUP_LOGIN_KEY) || ""; } catch { return ""; }
+}
+export function setSetupSession(token, login) {
+  clearToken();
+  sessionStorage.setItem(SETUP_TOKEN_KEY, token);
+  sessionStorage.setItem(SETUP_LOGIN_KEY, login);
+}
+export function clearSetupSession() {
+  try {
+    sessionStorage.removeItem(SETUP_TOKEN_KEY);
+    sessionStorage.removeItem(SETUP_LOGIN_KEY);
+  } catch { /* ignore */ }
+}
 
 export function getToken() {
   try {
@@ -28,10 +48,10 @@ export function clearToken() {
   }
 }
 
-async function request(path, { method = "GET", body, auth = true } = {}) {
-  const headers = { "Content-Type": "application/json" };
+export async function request(path, { method = "GET", body, auth = true, extraHeaders = {} } = {}) {
+  const headers = { "Content-Type": "application/json", ...extraHeaders };
   if (auth) {
-    const t = getToken();
+    const t = getToken() || getSetupToken();
     if (t) headers.Authorization = `Bearer ${t}`;
   }
   const res = await fetch(path, {
@@ -73,7 +93,12 @@ export async function login(loginName, password) {
     auth: false,
     body: { login: loginName, password },
   });
-  setToken(data.access_token);
+  if (data.access_token) {
+    clearSetupSession();
+    setToken(data.access_token);
+  } else if (data.requires_enrollment && data.setup_token) {
+    setSetupSession(data.setup_token, loginName.trim().toLowerCase());
+  }
   return data;
 }
 
@@ -83,7 +108,12 @@ export async function register(loginName, password, shopName) {
     auth: false,
     body: { login: loginName, password, shop_name: shopName },
   });
-  setToken(data.access_token);
+  if (data.requires_enrollment) {
+    setSetupSession(data.access_token, loginName.trim().toLowerCase());
+  } else {
+    clearSetupSession();
+    setToken(data.access_token);
+  }
   return data;
 }
 
@@ -100,9 +130,21 @@ export function getTransactions({ limit = 50, offset = 0, status } = {}) {
   return request(`/api/transactions?${p.toString()}`);
 }
 
-export function createTransaction(amountCents) {
+export function createTransaction(amountCents, idempotencyKey) {
   return request("/api/transactions", {
     method: "POST",
     body: { amount_cents: amountCents },
+    extraHeaders: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
   });
+}
+
+// Erreurs susceptibles de justifier une nouvelle tentative du paiement.
+// Ne pas réessayer une erreur de validation, d'authentification ou un refus métier.
+export function isTransientError(err) {
+  if (!err || err.name === "AbortError") return false;
+  const status = Number(err.status);
+  if (Number.isInteger(status) && status > 0) {
+    return [408, 425, 429, 500, 502, 503, 504].includes(status);
+  }
+  return err instanceof TypeError; // perte de connexion / erreur réseau de fetch
 }

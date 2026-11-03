@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getToken, clearToken, getMe } from "./api";
+import { getToken, clearToken, getMe, getSetupToken, getSetupLogin, clearSetupSession } from "./api";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
@@ -7,12 +7,14 @@ import Transactions from "./pages/Transactions";
 import Security from "./pages/Security";
 import Resilience from "./pages/Resilience";
 import Admin from "./pages/Admin";
+import FaceSetup from "./pages/FaceSetup";
 import { Spinner } from "./components/ui";
 
 const NAV = [
   { key: "dashboard", label: "Tableau de bord", icon: GridIcon, page: Dashboard },
   { key: "transactions", label: "Transactions", icon: CardIcon, page: Transactions },
   { key: "security", label: "Cybersécurité", icon: ShieldIcon, page: Security },
+  { key: "face", label: "Connexion faciale", icon: ShieldIcon, page: FaceSetup },
   { key: "resilience", label: "Cyber-résilience", icon: PulseIcon, page: Resilience },
   { key: "admin", label: "Administration", icon: UsersIcon, page: Admin, admin: true },
 ];
@@ -28,7 +30,10 @@ function readTheme() {
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(getToken()));
   const [authMode, setAuthMode] = useState("login");
+  const [setupPending, setSetupPending] = useState(Boolean(getSetupToken()));
   const [me, setMe] = useState(null);
+  const [profileError, setProfileError] = useState("");
+  const [profileRetry, setProfileRetry] = useState(0);
   const [active, setActive] = useState("dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState(readTheme());
@@ -42,31 +47,71 @@ export default function App() {
     }
   }, [theme]);
 
-  // Charge le profil après authentification.
+  // Le dashboard ne dépend pas seulement de /auth/login : il charge ensuite /api/me.
+  // Une erreur réseau / serveur ne doit pas supprimer un JWT valide.
   useEffect(() => {
+    let cancelled = false;
     if (!authed) {
       setMe(null);
+      setProfileError("");
       return;
     }
+    setProfileError("");
     getMe()
-      .then(setMe)
-      .catch(() => {
-        clearToken();
-        setAuthed(false);
+      .then((profile) => {
+        if (!cancelled) setMe(profile);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMe(null);
+        if (err?.status === 401) {
+          clearToken();
+          setAuthed(false);
+        } else {
+          setProfileError(err?.message || "Impossible de charger le profil commerçant.");
+        }
       });
-  }, [authed]);
+    return () => { cancelled = true; };
+  }, [authed, profileRetry]);
 
   const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
+  if (!authed && setupPending) {
+    return (
+      <div className="min-h-screen bg-[var(--bg)] px-5 py-8 text-[var(--text)]">
+        <FaceSetup mode="setup" me={{ login: getSetupLogin() }} onComplete={() => {
+          clearSetupSession();
+          setSetupPending(false);
+          setAuthMode("login");
+        }} onLogout={() => {
+          clearSetupSession();
+          setSetupPending(false);
+          setAuthMode("login");
+        }} />
+      </div>
+    );
+  }
 
   if (!authed) {
     return authMode === "login" ? (
       <Login
-        onSuccess={() => setAuthed(true)}
+        onSuccess={() => {
+          setActive("dashboard");
+          setAuthed(true);
+        }}
         onRegister={() => setAuthMode("register")}
+        onNeedsSetup={() => setSetupPending(true)}
       />
     ) : (
       <Register
-        onSuccess={() => setAuthed(true)}
+        onSuccess={(result) => {
+          if (result.requires_enrollment) {
+            setSetupPending(true);
+          } else {
+            setActive("face");
+            setAuthed(true);
+          }
+        }}
         onLogin={() => setAuthMode("login")}
       />
     );
@@ -74,8 +119,25 @@ export default function App() {
 
   if (!me) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg)]">
-        <Spinner />
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-5 text-[var(--text)]">
+        {profileError ? (
+          <div role="alert" className="w-full max-w-lg space-y-4 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6">
+            <h1 className="text-lg font-semibold">Profil NovaPay indisponible</h1>
+            <p className="text-sm text-[var(--text-muted)]">
+              La connexion a pu être acceptée, mais l'API /api/me n'a pas répondu correctement.
+              Le token est conservé pour permettre une nouvelle tentative.
+            </p>
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{profileError}</p>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={() => setProfileRetry((n) => n + 1)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white">
+                Réessayer le chargement
+              </button>
+              <button type="button" onClick={() => { clearToken(); setAuthed(false); setActive("dashboard"); }} className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm">
+                Se déconnecter
+              </button>
+            </div>
+          </div>
+        ) : <Spinner />}
       </div>
     );
   }
@@ -131,7 +193,7 @@ export default function App() {
 
       <main className="lg:pl-64">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-          <PageComponent me={me} />
+          <PageComponent me={me} onContinue={() => setActive("dashboard")} onLogout={logout} />
         </div>
       </main>
     </div>

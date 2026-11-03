@@ -4,6 +4,7 @@ import time
 import datetime
 import hashlib
 import secrets
+import uuid
 
 import jwt
 import psycopg2
@@ -49,17 +50,25 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def make_token(login: str, merchant_id: int, role: str) -> str:
-    return jwt.encode(
-        {
-            "sub": login,
-            "merchant_id": merchant_id,
-            "role": role,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=2),
-        },
-        SECRET,
-        algorithm="HS256",
-    )
+def face_required() -> bool:
+    """Activation progressive : activer sur le Mac après tests, puis sur VM1."""
+    return os.getenv("FACE_LOGIN_REQUIRED", "false").lower() in ("1", "true", "yes", "on")
+
+
+def make_token(login: str, merchant_id: int, role: str, *,
+               level: str = "legacy", methods: list[str] | None = None) -> str:
+    """Un token 'setup' ne doit JAMAIS autoriser l'API de paiement."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    payload = {
+        "sub": login,
+        "merchant_id": merchant_id,
+        "role": role,
+        "auth_level": level,
+        "amr": methods or ["pwd"],
+        "iat": now,
+        "exp": now + datetime.timedelta(minutes=15 if level == "setup" else 120),
+    }
+    return jwt.encode(payload, SECRET, algorithm="HS256")
 
 
 app = FastAPI(title="NovaPay auth-service")
@@ -116,6 +125,10 @@ def register(data: Register):
     login = data.login.strip().lower()
     if not re.fullmatch(r"[a-z0-9_.-]+", login):
         raise HTTPException(status_code=400, detail="Identifiant : lettres, chiffres, . _ - uniquement")
+    if face_required():
+        # Pas de création de comptes sans configuration WebAuthn / Face-AI.
+        from .face_auth import config as face_config
+        face_config()
     conn = db()
     try:
         cur = conn.cursor()
@@ -139,7 +152,13 @@ def register(data: Register):
         )
         conn.commit()
         cur.close()
-        return {"access_token": make_token(login, merchant_id, "user"), "token_type": "bearer"}
+        level = "setup" if face_required() else "legacy"
+        return {
+            "access_token": make_token(login, merchant_id, "user", level=level,
+                                       methods=["registration"] if level == "setup" else ["pwd"]),
+            "token_type": "bearer",
+            "requires_enrollment": face_required(),
+        }
     except HTTPException:
         conn.rollback()
         raise
@@ -149,20 +168,57 @@ def register(data: Register):
 
 @app.post("/login")
 def login(creds: Login):
+    login_name = creds.login.strip().lower()
+    if face_required():
+        from .face_auth import config as face_config
+        face_config()
     conn = db()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT password_hash, merchant_id, role FROM merchant_users WHERE login = %s",
-        (creds.login.strip().lower(),),
-    )
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, password_hash, merchant_id, role FROM merchant_users WHERE login=%s",
+                (login_name,),
+            )
+            row = cur.fetchone()
+            if not row or not verify_password(creds.password, row[1]):
+                raise HTTPException(status_code=401, detail="Identifiants invalides")
 
-    if not row or not verify_password(creds.password, row[0]):
-        raise HTTPException(status_code=401, detail="Identifiants invalides")
+            user_id, _, merchant_id, role = row
+            if not face_required():
+                return {"access_token": make_token(login_name, merchant_id, role), "token_type": "bearer"}
 
-    return {
-        "access_token": make_token(creds.login.strip().lower(), row[1], row[2]),
-        "token_type": "bearer",
-    }
+            cur.execute(
+                "SELECT EXISTS(SELECT 1 FROM face_templates WHERE user_id=%s), "
+                "EXISTS(SELECT 1 FROM passkey_credentials WHERE user_id=%s)",
+                (user_id, user_id),
+            )
+            face_enrolled, has_passkey = cur.fetchone()
+            if not (face_enrolled and has_passkey):
+                # Bootstrap limité : permet seulement l'enrôlement, jamais /api/*.
+                return {
+                    "requires_enrollment": True,
+                    "setup_token": make_token(login_name, merchant_id, role, level="setup", methods=["pwd"]),
+                }
+
+            cur.execute("DELETE FROM biometric_challenges WHERE expires_at < now()-interval '1 day'")
+            cur.execute(
+                "SELECT count(*) FROM biometric_challenges "
+                "WHERE user_id=%s AND purpose='face_login' AND created_at>now()-interval '15 minutes'",
+                (user_id,),
+            )
+            if cur.fetchone()[0] >= 8:
+                raise HTTPException(429, "Trop de tentatives : réessaie plus tard")
+            challenge_id = uuid.uuid4()
+            cur.execute(
+                "INSERT INTO biometric_challenges(id,user_id,purpose,expires_at) "
+                "VALUES (%s,%s,'face_login',now()+interval '3 minutes')",
+                (str(challenge_id), user_id),
+            )
+        conn.commit()
+        return {"requires_face": True, "challenge_id": str(challenge_id), "expires_in_seconds": 180}
+    finally:
+        conn.close()
+
+# Module de connexion faciale optionnel : l'ancienne connexion reste intacte.
+from .face_auth import router as face_router
+app.include_router(face_router)
