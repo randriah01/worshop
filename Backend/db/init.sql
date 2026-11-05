@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS merchant_users (
   password_hash TEXT NOT NULL,
   merchant_id   INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+  session_version BIGINT NOT NULL DEFAULT 0,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

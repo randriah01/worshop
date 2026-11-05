@@ -105,13 +105,14 @@ def current_user(authorization: str | None, *, allow_setup: bool = True):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, login, merchant_id, role FROM merchant_users WHERE login=%s AND merchant_id=%s",
+                "SELECT id, login, merchant_id, role, session_version "
+                "FROM merchant_users WHERE login=%s AND merchant_id=%s",
                 (payload.get("sub"), payload.get("merchant_id")),
             )
             row = cur.fetchone()
-        if not row:
-            raise HTTPException(401, "Session invalide")
-        return row
+        if not row or type(payload.get("sv")) is not int or payload["sv"] != row[4]:
+            raise HTTPException(401, "Session révoquée ou invalide")
+        return row[:4]
     finally:
         conn.close()
 
@@ -299,6 +300,11 @@ def delete_enrollment(body: PasswordConfirm, authorization: str | None = Header(
             cur.execute("DELETE FROM biometric_challenges WHERE user_id=%s", (user_id,))
             cur.execute("DELETE FROM face_templates WHERE user_id=%s", (user_id,))
             cur.execute("DELETE FROM passkey_credentials WHERE user_id=%s", (user_id,))
+            # Révoquer atomiquement tous les JWT (full et setup) déjà émis.
+            cur.execute(
+                "UPDATE merchant_users SET session_version=session_version+1 WHERE id=%s",
+                (user_id,),
+            )
         conn.commit()
         return {"deleted": True}
     finally:

@@ -59,7 +59,22 @@ def make_token(login: str, merchant_id: int, role: str, *,
                level: str = "legacy", methods: list[str] | None = None) -> str:
     """Un token 'setup' ne doit JAMAIS autoriser l'API de paiement."""
     now = datetime.datetime.now(datetime.timezone.utc)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_version FROM merchant_users WHERE login=%s AND merchant_id=%s",
+                (login, merchant_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise HTTPException(401, "Compte introuvable")
+        session_version = int(row[0])
+    finally:
+        conn.close()
+
     payload = {
+        "sv": session_version,
         "sub": login,
         "merchant_id": merchant_id,
         "role": role,
