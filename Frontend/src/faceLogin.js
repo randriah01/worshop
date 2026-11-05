@@ -1,5 +1,5 @@
 // Connexion faciale pilote. Le serveur NE délivre le JWT qu'après visage + WebAuthn.
-import { request, setToken, clearSetupSession } from './api';
+import { request, setToken, clearSetupSession } from './api.js';
 
 function fromBase64Url(value) {
   const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -111,6 +111,7 @@ export async function finishFaceLogin(challengeId, images) {
   const session = await request('/auth/face/login/passkey/verify', {
     method: 'POST', auth: false, body: { challenge_id: challengeId, credential },
   });
+  if (!session?.access_token) throw new Error('Jeton de session manquant après vérification MFA.');
   clearSetupSession();
   setToken(session.access_token);
   return session;

@@ -1,10 +1,20 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" class="dark" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NovaPay — Resilience-Alpha</title>
+    <meta name="theme-color" content="#050B24" />
+    <meta name="description" content="NovaPay — encaissement cyber-résilient : détection d'attaque et reprise automatique." />
+    <title>NovaPay — Paiements cyber-résilients</title>
+    <script>
+      // Applique le thème mémorisé avant le premier rendu (évite un flash).
+      try {
+        var t = localStorage.getItem("novapay_theme") || "dark";
+        document.documentElement.classList.toggle("dark", t === "dark");
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

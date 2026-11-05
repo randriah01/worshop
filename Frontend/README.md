@@ -1,8 +1,23 @@
 # NovaPay — Dashboard (Frontend)
 
-Interface web de la plateforme NovaPay : React 19 + Vite + Tailwind CSS v4.
-Page de connexion + 4 pages (Tableau de bord, Transactions, Cybersécurité,
-Cyber-résilience), branchées sur le backend `payment-api` / `auth-service`.
+Interface web de la plateforme NovaPay : React 19 + Vite + Tailwind CSS v4,
+shadcn/ui (Radix), Magic UI, Motion et Lucide React.
+Page d'accueil publique, connexion / inscription, puis 5 pages (Tableau de bord,
+Transactions, Cybersécurité, Cyber-résilience, Administration), branchées sur le
+backend `payment-api` / `auth-service`.
+
+## Design system
+
+| Dossier | Rôle |
+|---|---|
+| `src/index.css` | Tokens (couleurs du logo, rayons, typo, animations), thèmes clair/sombre |
+| `src/components/ui/` | Composants shadcn/ui (Button, Card, Input, Select, Dialog, Table, Sheet…) |
+| `src/components/magicui/` | Composants Magic UI adaptés (Number Ticker, Magic Card, Border Beam, Animated Beam, Ripple, Shimmer Button…) |
+| `src/components/app/` | Composants NovaPay (logo, carte bancaire 3D, shell, graphiques, badges) |
+| `src/lib/` | `cn()` et formatage (euros, dates) |
+
+Typographies : Plus Jakarta Sans (interface) et Geist Mono (montants, numéros de carte).
+Les animations respectent le réglage « réduire les animations » du système.
 
 ## Démarrage
 

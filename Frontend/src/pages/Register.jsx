@@ -1,7 +1,12 @@
 import { useState } from "react";
+import { Lock, Store, User, Loader2, ShieldCheck } from "lucide-react";
 import { register } from "../api";
+import { AuthLayout, FormError } from "@/components/app/auth-layout";
+import { IconInput } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ShimmerButton } from "@/components/magicui/shimmer-button";
 
-export default function Register({ onSuccess, onLogin }) {
+export default function Register({ onSuccess, onLogin, onBack }) {
   const [shopName, setShopName] = useState("");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -35,61 +40,69 @@ export default function Register({ onSuccess, onLogin }) {
     }
   }
 
+  const strong = password.length >= 6;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4 py-8">
-      <div className="w-full max-w-sm np-fade">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          <span className="grid h-10 w-10 place-items-center rounded-lg bg-blue-600 text-lg font-bold text-white">N</span>
-          <div className="leading-tight">
-            <p className="text-lg font-semibold text-[var(--text)]">NovaPay</p>
-            <p className="text-xs text-[var(--text-faint)]">Créer votre compte commerçant</p>
+    <AuthLayout
+      onBack={onBack}
+      cardName={shopName}
+      headline="Votre commerce, prêt à encaisser en deux minutes."
+      text="Créez votre compte marchand : la carte de démonstration se personnalise au nom de votre boutique."
+    >
+      <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground">Créer un compte</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Ouvrez votre espace marchand NovaPay.</p>
+
+      <form onSubmit={submit} className="mt-7 space-y-4" noValidate>
+        <div>
+          <Label htmlFor="shop">Nom de la boutique</Label>
+          <IconInput id="shop" icon={Store} value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="Le Fournil de Paris" />
+        </div>
+        <div>
+          <Label htmlFor="reg-login">Identifiant</Label>
+          <IconInput id="reg-login" icon={User} value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder="fournil" autoComplete="username" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="reg-pwd">Mot de passe</Label>
+            <IconInput id="reg-pwd" icon={Lock} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="6 caractères min." autoComplete="new-password" />
+          </div>
+          <div>
+            <Label htmlFor="reg-confirm">Confirmation</Label>
+            <IconInput
+              id="reg-confirm"
+              icon={Lock}
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="••••••"
+              autoComplete="new-password"
+              aria-invalid={confirm.length > 0 && confirm !== password}
+            />
           </div>
         </div>
+        <p className={"flex items-center gap-1.5 text-xs " + (strong ? "text-success" : "text-subtle-foreground")}>
+          <ShieldCheck className="size-3.5" /> {strong ? "Longueur du mot de passe suffisante" : "Au moins 6 caractères"}
+        </p>
 
-        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-xl">
-          <h1 className="text-center text-base font-medium text-[var(--text)]">Inscription</h1>
+        <FormError>{error}</FormError>
 
-          <Field label="Nom du commerce">
-            <input value={shopName} onChange={(e) => setShopName(e.target.value)} className={inputCls} placeholder="Ma boutique" />
-          </Field>
-          <Field label="Identifiant">
-            <input value={loginName} onChange={(e) => setLoginName(e.target.value)} className={inputCls} placeholder="mon_identifiant" autoComplete="username" />
-          </Field>
-          <Field label="Mot de passe">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="6 caractères minimum" autoComplete="new-password" />
-          </Field>
-          <Field label="Confirmer le mot de passe">
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} placeholder="••••••••" autoComplete="new-password" />
-          </Field>
-
-          {error && (
-            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>
+        <ShimmerButton type="submit" disabled={loading} className="h-12 w-full">
+          {loading ? (
+            <>
+              <Loader2 className="animate-spin" /> Création…
+            </>
+          ) : (
+            "Créer mon compte"
           )}
+        </ShimmerButton>
+      </form>
 
-          <button type="submit" disabled={loading} className="w-full rounded-lg bg-blue-600 py-2.5 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60">
-            {loading ? "Création…" : "Créer mon compte"}
-          </button>
-
-          <p className="text-center text-sm text-[var(--text-muted)]">
-            Déjà un compte ?{" "}
-            <button type="button" onClick={onLogin} className="text-blue-500 hover:underline">
-              Se connecter
-            </button>
-          </p>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-const inputCls =
-  "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-[var(--text)] outline-none focus:border-blue-500";
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm text-[var(--text-muted)]">{label}</label>
-      {children}
-    </div>
+      <p className="mt-8 text-center text-sm text-muted-foreground">
+        Déjà inscrit ?{" "}
+        <button type="button" onClick={onLogin} className="cursor-pointer font-semibold text-primary hover:underline">
+          Se connecter
+        </button>
+      </p>
+    </AuthLayout>
   );
 }

@@ -1,7 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
+import {
+  Search, Lock, CheckCircle2, XCircle, Loader2, Receipt, ChevronLeft, ChevronRight, Eye, RotateCcw, Plus,
+} from "lucide-react";
 import { getTransactions, createTransaction, isTransientError } from "../api";
-import { Card, StatusBadge, Spinner, ErrorNote, euros, dateFr } from "../components/ui";
-import { Header } from "./Dashboard";
+import { euros, dateFr } from "@/lib/format";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input, IconInput } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/app/page-header";
+import { StatusBadge } from "@/components/app/status-badge";
+import { CreditCard } from "@/components/app/credit-card";
+import { ErrorNote, EmptyState } from "@/components/app/states";
+import { ShimmerButton } from "@/components/magicui/shimmer-button";
+import { BorderBeam } from "@/components/magicui/border-beam";
+import { fireConfetti } from "@/components/magicui/confetti";
+import { cn } from "@/lib/utils";
 
 const PAGE = 10;
 
@@ -14,6 +34,7 @@ const RETRY_BASE_MS = 2000;
 const RETRY_MAX_DELAY_MS = 10000;
 
 export default function Transactions() {
+
   const [all, setAll] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,7 +68,7 @@ export default function Transactions() {
 
   return (
     <div className="space-y-6">
-      <Header title="Transactions" subtitle="Paiements simulés — aucun mouvement réel" onRefresh={load} />
+      <PageHeader title="Transactions" subtitle="Paiements simulés, aucun mouvement réel" onRefresh={load} refreshing={loading} />
 
       <Checkout
         onPaid={() => {
@@ -56,107 +77,141 @@ export default function Transactions() {
         }}
       />
 
-      <h2 className="pt-2 text-sm font-medium uppercase tracking-wide text-[var(--text-faint)]">
-        Historique
-      </h2>
-
-      {/* Filtres */}
-      <div className="flex flex-wrap gap-3">
-        <input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setPage(0);
-          }}
-          placeholder="Rechercher par identifiant…"
-          className="w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-blue-500"
-        />
-        <select
-          value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
-            setPage(0);
-          }}
-          className="rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-blue-500"
-        >
-          <option value="">Tous les statuts</option>
-          <option value="validated">Réussie</option>
-          <option value="pending">En attente</option>
-          <option value="rejected">Échouée</option>
-          <option value="error">Erreur</option>
-        </select>
-      </div>
-
-      {/* Tableau */}
       <Card>
-        {loading ? (
-          <Spinner />
-        ) : error ? (
-          <ErrorNote>{error}</ErrorNote>
-        ) : view.length === 0 ? (
-          <p className="py-8 text-center text-sm text-[var(--text-faint)]">
-            Aucune transaction. Effectue un paiement ci-dessus.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-[var(--text-faint)]">
-                <tr className="border-b border-[var(--border)]">
-                  <th className="py-2 pr-4">ID</th>
-                  <th className="py-2 pr-4">Commerçant</th>
-                  <th className="py-2 pr-4">Montant</th>
-                  <th className="py-2 pr-4">Statut</th>
-                  <th className="py-2 pr-4">Date</th>
-                  <th className="py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.map((t) => (
-                  <tr key={t.id} className="border-b border-[var(--border)] last:border-0">
-                    <td className="py-2.5 pr-4 font-mono text-[var(--text-muted)]">#{t.id}</td>
-                    <td className="py-2.5 pr-4 text-[var(--text-soft)]">{t.merchant}</td>
-                    <td className="py-2.5 pr-4 font-medium text-[var(--text)]">{euros(t.amount_cents)}</td>
-                    <td className="py-2.5 pr-4"><StatusBadge status={t.status} /></td>
-                    <td className="py-2.5 pr-4 text-[var(--text-muted)]">{dateFr(t.created_at)}</td>
-                    <td className="py-2.5 text-right">
-                      <button
-                        onClick={() => setDetail(t)}
-                        className="text-xs text-blue-400 hover:underline"
-                      >
-                        Détail
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <CardHeader className="flex-wrap">
+          <div>
+            <CardTitle>Historique</CardTitle>
+            <CardDescription>{filtered.length} transaction(s)</CardDescription>
           </div>
-        )}
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            <IconInput
+              icon={Search}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(0);
+              }}
+              placeholder="N° de transaction…"
+              inputMode="numeric"
+              aria-label="Rechercher par identifiant"
+              className="min-w-0 flex-1 sm:w-60 sm:flex-none"
+              inputClassName="h-10"
+            />
+            <Select
+              value={status || "all"}
+              onValueChange={(v) => {
+                setStatus(v === "all" ? "" : v);
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="h-10 w-full sm:w-44" aria-label="Filtrer par statut">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les statuts</SelectItem>
+                <SelectItem value="validated">Réussie</SelectItem>
+                <SelectItem value="pending">En attente</SelectItem>
+                <SelectItem value="rejected">Échouée</SelectItem>
+                <SelectItem value="error">Erreur</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
 
-        {!loading && filtered.length > PAGE && (
-          <div className="mt-4 flex items-center justify-between text-sm text-[var(--text-muted)]">
-            <span>{filtered.length} transaction(s) · page {page + 1}/{pages}</span>
-            <div className="flex gap-2">
-              <button
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-                className="rounded-lg border border-[var(--border)] px-3 py-1 disabled:opacity-40"
-              >
-                Précédent
-              </button>
-              <button
-                disabled={page >= pages - 1}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-[var(--border)] px-3 py-1 disabled:opacity-40"
-              >
-                Suivant
-              </button>
+        <CardContent>
+          {loading && all.length === 0 ? (
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-11" />
+              ))}
             </div>
-          </div>
-        )}
+          ) : error ? (
+            <ErrorNote>{error}</ErrorNote>
+          ) : view.length === 0 ? (
+            <EmptyState icon={Receipt} title="Aucune transaction">
+              {all.length ? "Aucun résultat pour ces filtres." : "Effectuez un paiement ci-dessus pour remplir l'historique."}
+            </EmptyState>
+          ) : (
+            <>
+              {/* Tableau (tablette et ordinateur) */}
+              <div className="hidden sm:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Identifiant</TableHead>
+                      <TableHead>Commerçant</TableHead>
+                      <TableHead className="text-right">Montant</TableHead>
+                      <TableHead>Statut</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {view.map((t, i) => (
+                      <motion.tr
+                        key={t.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: Math.min(i * 0.025, 0.25) }}
+                        className="border-b border-border transition-colors hover:bg-muted/60"
+                      >
+                        <TableCell className="font-mono text-muted-foreground">#{t.id}</TableCell>
+                        <TableCell className="text-foreground">{t.merchant}</TableCell>
+                        <TableCell className="text-right font-mono font-semibold text-foreground tabular">{euros(t.amount_cents)}</TableCell>
+                        <TableCell><StatusBadge status={t.status} /></TableCell>
+                        <TableCell className="text-muted-foreground">{dateFr(t.created_at)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setDetail(t)}>
+                            <Eye /> Détail
+                          </Button>
+                        </TableCell>
+                      </motion.tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Liste (mobile) */}
+              <ul className="space-y-2 sm:hidden">
+                {view.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      onClick={() => setDetail(t)}
+                      className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3.5 py-3 text-left"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono font-semibold text-foreground tabular">{euros(t.amount_cents)}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          #{t.id} · {dateFr(t.created_at)}
+                        </p>
+                      </div>
+                      <StatusBadge status={t.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {!loading && filtered.length > PAGE && (
+            <div className="mt-5 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>
+                Page <span className="font-semibold text-foreground">{page + 1}</span> sur {pages}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                  <ChevronLeft /> Précédent
+                </Button>
+                <Button variant="outline" size="sm" disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)}>
+                  Suivant <ChevronRight />
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
       </Card>
 
-      {detail && <DetailModal tx={detail} onClose={() => setDetail(null)} />}
+      <DetailModal tx={detail} onClose={() => setDetail(null)} />
     </div>
   );
 }
@@ -216,6 +271,7 @@ function newKey() {
 }
 
 function Checkout({ onPaid }) {
+
   const [amount, setAmount] = useState("24.90");
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
@@ -322,183 +378,242 @@ function Checkout({ onPaid }) {
     setIdemKey(newKey()); // nouveau paiement = nouvelle clé
   }
 
-  if (stage === "processing") {
-    return (
-      <Card>
-        <div className="flex flex-col items-center gap-3 py-12">
-          <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--border)] border-t-blue-400" />
-          <p className="text-[var(--text-soft)]">Traitement du paiement…</p>
-          {retryInfo ? (
-            <>
-              <p className="text-xs text-amber-400">
-                Service momentanément indisponible — nouvelle tentative automatique n°{retryInfo.n} (jusqu'à 3 min)…
-              </p>
-              <button
-                type="button"
-                onClick={() => { cancelRef.current = true; }}
-                className="mt-1 rounded-lg border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-soft)] hover:bg-[var(--panel-2)]"
-              >
-                Annuler
-              </button>
-            </>
-          ) : (
-            <p className="text-xs text-[var(--text-faint)]">Vérification auprès de la banque (simulée)</p>
-          )}
-        </div>
-      </Card>
-    );
-  }
+  // --- Présentation uniquement (aucun impact sur la logique de paiement) ---
+  const [cvcFocus, setCvcFocus] = useState(false);
+  const panelRef = useRef(null);
 
-  if (stage === "success") {
-    return (
-      <Card className="np-fade">
-        <div className="flex flex-col items-center gap-3 py-10 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-500/15 text-3xl text-emerald-400">✓</span>
-          <h2 className="text-lg font-semibold text-[var(--text)]">Paiement réussi</h2>
-          <p className="text-[var(--text-soft)]">{euros(cents)} encaissés</p>
-          <p className="text-sm text-[var(--text-faint)]">
-            Transaction #{result?.id} · nouveau solde commerçant {euros(result?.new_balance_cents)}
-          </p>
-          {result?.retried > 0 && (
-            <p className="text-xs text-emerald-400">
-              Validé automatiquement après {result.retried} nouvelle(s) tentative(s), sans double débit.
-            </p>
-          )}
-          <button
-            onClick={reset}
-            className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
-          >
-            Nouveau paiement
-          </button>
-        </div>
-      </Card>
-    );
-  }
+  useEffect(() => {
+    if (stage === "success") {
+      toast.success("Paiement réussi", { description: `${euros(cents)} encaissés` });
+      const r = panelRef.current?.getBoundingClientRect();
+      fireConfetti(r ? { x: (r.left + r.width / 2) / window.innerWidth, y: (r.top + r.height / 3) / window.innerHeight } : undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
-  if (stage === "declined") {
-    return (
-      <Card className="np-fade">
-        <div className="flex flex-col items-center gap-3 py-10 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500/15 text-3xl text-red-400">✕</span>
-          <h2 className="text-lg font-semibold text-[var(--text)]">Paiement refusé</h2>
-          <p className="max-w-sm text-sm text-[var(--text-muted)]">{result?.reason}</p>
-          {result?.retried > 0 && (
-            <p className="max-w-sm text-xs text-[var(--text-faint)]">
-              {result.retried} nouvelle(s) tentative(s) automatique(s) sans succès. Aucun double débit possible : le même paiement est renvoyé avec la même clé.
-            </p>
-          )}
-          <button
-            onClick={backToForm}
-            className="mt-3 rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--text)] hover:bg-[var(--panel-2)]"
-          >
-            Réessayer
-          </button>
-        </div>
-      </Card>
-    );
-  }
-
-  // --- Formulaire ---
   return (
-    <Card>
-      <div className="grid gap-6 lg:grid-cols-5">
-        {/* Résumé (gauche) */}
-        <div className="lg:col-span-2">
-          <h2 className="font-medium text-[var(--text)]">Nouveau paiement</h2>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Règle un montant par carte. Environnement de démonstration.
-          </p>
-          <div className="mt-5">
-            <label className="mb-1 block text-xs text-[var(--text-muted)]">Montant à payer (€)</label>
-            <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3">
-              <span className="text-[var(--text-faint)]">€</span>
+    <Card ref={panelRef} className="relative overflow-hidden">
+      {stage === "processing" && <BorderBeam size={120} duration={3} borderWidth={2} />}
+      <div className="grid lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        {/* Aperçu de la carte + montant */}
+        <div className="relative isolate overflow-hidden border-b border-border bg-surface-2 p-5 sm:p-7 lg:border-r lg:border-b-0">
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(70%_60%_at_20%_0%,rgb(0_130_253/0.14),transparent_70%)]" />
+          <h2 className="text-lg font-bold tracking-tight text-foreground">Nouveau paiement</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Réglez un montant par carte. Environnement de démonstration.</p>
+          <div className="mx-auto mt-6 max-w-[22rem]">
+            <CreditCard number={number} name={name} expiry={expiry} cvc={cvc} brand={brand} flipped={cvcFocus} />
+          </div>
+          <div className="mx-auto mt-6 max-w-[22rem]">
+            <Label htmlFor="amount">Montant à payer</Label>
+            <div
+              className={cn(
+                "flex items-center rounded-control border bg-card px-4 transition-[border-color,box-shadow] focus-within:border-ring focus-within:shadow-[0_0_0_4px_rgb(2_169_252/0.15)]",
+                errors.amount ? "border-destructive" : "border-input"
+              )}
+            >
               <input
+                id="amount"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-transparent px-2 py-2 text-lg font-semibold text-[var(--text)] outline-none"
+                inputMode="decimal"
+                disabled={stage !== "form"}
+                className="h-14 w-full min-w-0 bg-transparent font-mono text-2xl font-semibold text-foreground tabular outline-none"
               />
+              <span className="text-lg font-semibold text-subtle-foreground">€</span>
             </div>
-            {errors.amount && <p className="mt-1 text-xs text-red-400">{errors.amount}</p>}
+            {errors.amount && <p className="mt-1.5 text-xs font-medium text-destructive">{errors.amount}</p>}
           </div>
         </div>
 
-        {/* Formulaire carte (droite) */}
-        <form onSubmit={pay} className="space-y-4 lg:col-span-3">
-          <Field label="Numéro de carte" error={errors.number}>
-            <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--panel-2)] pr-3 focus-within:border-blue-500">
-              <input
-                value={number}
-                onChange={(e) => setNumber(formatCard(e.target.value))}
-                placeholder="1234 5678 9012 3456"
-                inputMode="numeric"
-                className="w-full bg-transparent px-3 py-2 font-mono text-[var(--text)] outline-none"
-              />
-              {brand && <span className="text-xs font-medium text-[var(--text-muted)]">{brand}</span>}
-            </div>
-          </Field>
+        {/* Formulaire / états */}
+        <div className="relative min-h-[26rem] p-5 sm:p-7">
+          <AnimatePresence mode="wait" initial={false}>
+            {stage === "processing" && (
+              <StagePanel key="processing">
+                <span className="relative grid size-16 place-items-center">
+                  <span className="absolute inset-0 animate-ping rounded-full bg-electric/20 motion-reduce:hidden" />
+                  <span className="relative grid size-16 place-items-center rounded-full bg-accent text-accent-foreground">
+                    <Loader2 className="size-7 animate-spin" />
+                  </span>
+                </span>
+                <p className="mt-5 text-lg font-semibold text-foreground">Traitement du paiement…</p>
+                {retryInfo ? (
+                  <>
+                    <p className="mt-2 max-w-xs text-sm text-warning">
+                      Service momentanément indisponible. Nouvelle tentative automatique n°{retryInfo.n} (jusqu'à 3 min)…
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => {
+                        cancelRef.current = true;
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">Vérification auprès de la banque (simulée)</p>
+                )}
+              </StagePanel>
+            )}
 
-          <Field label="Titulaire de la carte" error={errors.name}>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="PRINCIA R."
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 uppercase text-[var(--text)] outline-none focus:border-blue-500"
-            />
-          </Field>
+            {stage === "success" && (
+              <StagePanel key="success">
+                <motion.span
+                  initial={{ scale: 0.4, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 18 }}
+                  className="grid size-16 place-items-center rounded-full bg-success/15 text-success"
+                >
+                  <CheckCircle2 className="size-8" />
+                </motion.span>
+                <h3 className="mt-5 text-xl font-bold tracking-tight text-foreground">Paiement réussi</h3>
+                <p className="mt-1 font-mono text-2xl font-semibold text-foreground tabular">{euros(cents)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Transaction #{result?.id}. Nouveau solde commerçant : {euros(result?.new_balance_cents)}
+                </p>
+                {result?.retried > 0 && (
+                  <p className="mt-2 max-w-xs text-xs font-medium text-success">
+                    Validé automatiquement après {result.retried} nouvelle(s) tentative(s), sans double débit.
+                  </p>
+                )}
+                <Button onClick={reset} className="mt-6">
+                  <Plus /> Nouveau paiement
+                </Button>
+              </StagePanel>
+            )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Expiration" error={errors.expiry}>
-              <input
-                value={expiry}
-                onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                placeholder="MM/AA"
-                inputMode="numeric"
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-[var(--text)] outline-none focus:border-blue-500"
-              />
-            </Field>
-            <Field label="CVC" error={errors.cvc}>
-              <input
-                value={cvc}
-                onChange={(e) => setCvc(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                placeholder="123"
-                inputMode="numeric"
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-[var(--text)] outline-none focus:border-blue-500"
-              />
-            </Field>
-          </div>
+            {stage === "declined" && (
+              <StagePanel key="declined">
+                <motion.span
+                  initial={{ x: 0 }}
+                  animate={{ x: [0, -8, 8, -5, 5, 0] }}
+                  transition={{ duration: 0.45 }}
+                  className="grid size-16 place-items-center rounded-full bg-destructive/15 text-destructive"
+                >
+                  <XCircle className="size-8" />
+                </motion.span>
+                <h3 className="mt-5 text-xl font-bold tracking-tight text-foreground">Paiement refusé</h3>
+                <p className="mt-1 max-w-sm text-sm text-muted-foreground">{result?.reason}</p>
+                {result?.retried > 0 && (
+                  <p className="mt-2 max-w-sm text-xs text-subtle-foreground">
+                    {result.retried} nouvelle(s) tentative(s) automatique(s) sans succès. Aucun double débit possible : le même
+                    paiement est renvoyé avec la même clé.
+                  </p>
+                )}
+                <Button variant="outline" onClick={backToForm} className="mt-6">
+                  <RotateCcw /> Réessayer
+                </Button>
+              </StagePanel>
+            )}
 
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-blue-600 py-2.5 font-medium text-white transition hover:bg-blue-500"
-          >
-            Payer {cents > 0 ? euros(cents) : ""}
-          </button>
+            {stage === "form" && (
+              <motion.form
+                key="form"
+                onSubmit={pay}
+                noValidate
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: 0.25 }}
+                className="space-y-4"
+              >
+                <Field label="Numéro de carte" error={errors.number} htmlFor="cc-number">
+                  <IconInput
+                    id="cc-number"
+                    value={number}
+                    onChange={(e) => setNumber(formatCard(e.target.value))}
+                    placeholder="1234 5678 9012 3456"
+                    inputMode="numeric"
+                    autoComplete="cc-number"
+                    aria-invalid={Boolean(errors.number)}
+                    inputClassName="font-mono tracking-wider"
+                    trailing={brand ? <span className="text-xs font-bold text-accent-foreground italic">{brand}</span> : null}
+                  />
+                </Field>
 
-          <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--text-faint)]">
-            <LockIcon /> Paiement simulé — aucune donnée bancaire réelle n'est collectée ni stockée.
-          </p>
-        </form>
+                <Field label="Titulaire de la carte" error={errors.name} htmlFor="cc-name">
+                  <Input
+                    id="cc-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="PRINCIA R."
+                    autoComplete="cc-name"
+                    aria-invalid={Boolean(errors.name)}
+                    className="uppercase"
+                  />
+                </Field>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Expiration" error={errors.expiry} htmlFor="cc-exp">
+                    <Input
+                      id="cc-exp"
+                      value={expiry}
+                      onChange={(e) => setExpiry(formatExpiry(e.target.value))}
+                      placeholder="MM/AA"
+                      inputMode="numeric"
+                      autoComplete="cc-exp"
+                      aria-invalid={Boolean(errors.expiry)}
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field label="CVC" error={errors.cvc} htmlFor="cc-cvc">
+                    <Input
+                      id="cc-cvc"
+                      value={cvc}
+                      onChange={(e) => setCvc(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      onFocus={() => setCvcFocus(true)}
+                      onBlur={() => setCvcFocus(false)}
+                      placeholder="123"
+                      inputMode="numeric"
+                      autoComplete="cc-csc"
+                      aria-invalid={Boolean(errors.cvc)}
+                      className="font-mono"
+                    />
+                  </Field>
+                </div>
+
+                <ShimmerButton type="submit" className="mt-2 h-12 w-full">
+                  <Lock /> Payer {cents > 0 ? euros(cents) : ""}
+                </ShimmerButton>
+
+                <p className="flex items-center justify-center gap-1.5 text-center text-xs text-subtle-foreground">
+                  <Lock className="size-3" aria-hidden="true" /> Paiement simulé : aucune donnée bancaire réelle n'est collectée ni stockée.
+                </p>
+              </motion.form>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </Card>
   );
 }
 
-function Field({ label, error, children }) {
+function StagePanel({ children }) {
   return (
-    <div>
-      <label className="mb-1 block text-xs text-[var(--text-muted)]">{label}</label>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      className="flex h-full min-h-[22rem] flex-col items-center justify-center text-center"
+      aria-live="polite"
+    >
       {children}
-      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
-    </div>
+    </motion.div>
   );
 }
 
-function LockIcon() {
+function Field({ label, error, htmlFor, children }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="4" y="11" width="16" height="10" rx="2" />
-      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-    </svg>
+    <div>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {error && <p className="mt-1.5 text-xs font-medium text-destructive">{error}</p>}
+    </div>
   );
 }
 
@@ -506,33 +621,38 @@ function LockIcon() {
 
 function DetailModal({ tx, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 np-fade"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-semibold text-[var(--text)]">Transaction #{tx.id}</h3>
-          <button onClick={onClose} className="text-[var(--text-faint)] hover:text-[var(--text-soft)]">✕</button>
-        </div>
-        <dl className="space-y-3 text-sm">
-          <Row k="Identifiant" v={`#${tx.id}`} />
-          <Row k="Commerçant" v={tx.merchant} />
-          <Row k="Montant" v={euros(tx.amount_cents)} />
-          <Row k="Statut" v={<StatusBadge status={tx.status} />} />
-          <Row k="Date" v={dateFr(tx.created_at)} />
-          <Row k="Devise" v="EUR" />
-        </dl>
-      </div>
-    </div>
+    <Dialog open={Boolean(tx)} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        {tx && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Transaction #{tx.id}</DialogTitle>
+              <DialogDescription>{dateFr(tx.created_at)}</DialogDescription>
+            </DialogHeader>
+            <div className="mb-5 rounded-2xl bg-surface-2 p-5 text-center">
+              <p className="font-mono text-3xl font-semibold tracking-tight text-foreground tabular">{euros(tx.amount_cents)}</p>
+              <div className="mt-2 flex justify-center"><StatusBadge status={tx.status} /></div>
+            </div>
+            <dl className="space-y-0 text-sm">
+              <Row k="Identifiant" v={<span className="font-mono">#{tx.id}</span>} />
+              <Row k="Commerçant" v={tx.merchant} />
+              <Row k="Montant" v={euros(tx.amount_cents)} />
+              <Row k="Statut" v={<StatusBadge status={tx.status} />} />
+              <Row k="Date" v={dateFr(tx.created_at)} />
+              <Row k="Devise" v="EUR" />
+            </dl>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function Row({ k, v }) {
   return (
-    <div className="flex items-center justify-between border-b border-[var(--border)] pb-2 last:border-0">
-      <dt className="text-[var(--text-muted)]">{k}</dt>
-      <dd className="font-medium text-[var(--text)]">{v}</dd>
+    <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-0">
+      <dt className="text-muted-foreground">{k}</dt>
+      <dd className="text-right font-medium text-foreground">{v}</dd>
     </div>
   );
 }

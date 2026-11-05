@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Users, ArrowLeftRight, Wallet, ChevronDown, Shield } from "lucide-react";
 import { getAdminUsers } from "../api";
-import { Card, StatCard, StatusBadge, Spinner, ErrorNote, euros, dateFr } from "../components/ui";
-import { Header } from "./Dashboard";
+import { euros, dateFr } from "@/lib/format";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { PageHeader } from "@/components/app/page-header";
+import { StatCard } from "@/components/app/stat-card";
+import { StatusBadge } from "@/components/app/status-badge";
+import { ErrorNote, PageSkeleton } from "@/components/app/states";
+import { cn } from "@/lib/utils";
+
+const fmtEuros = (n) => euros(Math.round(n));
 
 export default function Admin() {
   const [users, setUsers] = useState([]);
@@ -24,7 +35,7 @@ export default function Admin() {
     load();
   }, []);
 
-  if (loading) return <Spinner />;
+  if (loading && users.length === 0) return <PageSkeleton />;
   if (error) return <ErrorNote>{error}</ErrorNote>;
 
   const totalTx = users.reduce((s, u) => s + u.transactions.length, 0);
@@ -35,79 +46,92 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <Header title="Administration" subtitle="Tous les comptes et leurs transactions" onRefresh={load} />
+      <PageHeader title="Administration" subtitle="Tous les comptes et leurs transactions" onRefresh={load} refreshing={loading} />
 
-      <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Comptes" value={users.length} />
-        <StatCard label="Transactions" value={totalTx} />
-        <StatCard label="Volume total" value={euros(totalVolume)} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Comptes" value={users.length} icon={Users} />
+        <StatCard label="Transactions" value={totalTx} icon={ArrowLeftRight} />
+        <StatCard label="Volume total" value={totalVolume} format={fmtEuros} icon={Wallet} />
       </div>
 
       <div className="space-y-3">
         {users.map((u) => {
-          const vol = u.transactions
-            .filter((t) => t.status === "validated")
-            .reduce((a, t) => a + t.amount_cents, 0);
+          const vol = u.transactions.filter((t) => t.status === "validated").reduce((a, t) => a + t.amount_cents, 0);
           const isOpen = open === u.merchant_id;
           return (
-            <Card key={u.merchant_id}>
+            <Card key={u.merchant_id} className={cn("overflow-hidden transition-colors", isOpen && "border-input")}>
               <button
                 onClick={() => setOpen(isOpen ? null : u.merchant_id)}
-                className="flex w-full flex-wrap items-center gap-3 text-left"
+                aria-expanded={isOpen}
+                className="flex w-full cursor-pointer flex-wrap items-center gap-4 p-4 text-left transition hover:bg-muted/50 sm:p-5"
               >
-                <span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-600/15 text-sm font-semibold text-blue-500">
+                <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand text-base font-bold text-white">
                   {u.shop_name.slice(0, 1).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-[var(--text)]">
-                    {u.shop_name}
+                  <p className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
+                    <span className="truncate">{u.shop_name}</span>
                     {u.role === "admin" && (
-                      <span className="ml-2 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-400">admin</span>
+                      <Badge tone="violet">
+                        <Shield /> admin
+                      </Badge>
                     )}
                   </p>
-                  <p className="text-xs text-[var(--text-faint)]">@{u.login}</p>
+                  <p className="font-mono text-xs text-subtle-foreground">@{u.login}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-medium text-[var(--text)]">{euros(u.balance_cents)}</p>
-                  <p className="text-xs text-[var(--text-faint)]">{u.transactions.length} transaction(s)</p>
+                  <p className="font-mono font-semibold text-foreground tabular">{euros(u.balance_cents)}</p>
+                  <p className="text-xs text-subtle-foreground">{u.transactions.length} transaction(s)</p>
                 </div>
-                <span className="text-[var(--text-faint)]">{isOpen ? "▲" : "▼"}</span>
+                <motion.span animate={{ rotate: isOpen ? 180 : 0 }} transition={{ duration: 0.25 }} className="text-subtle-foreground">
+                  <ChevronDown className="size-5" aria-hidden="true" />
+                </motion.span>
               </button>
 
-              {isOpen && (
-                <div className="mt-4 border-t border-[var(--border)] pt-4">
-                  <div className="mb-2 flex justify-between text-xs text-[var(--text-muted)]">
-                    <span>Volume encaissé : {euros(vol)}</span>
-                    <span>Inscrit le {dateFr(u.created_at)}</span>
-                  </div>
-                  {u.transactions.length === 0 ? (
-                    <p className="py-3 text-center text-sm text-[var(--text-faint)]">Aucune transaction.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="text-xs uppercase text-[var(--text-faint)]">
-                          <tr className="border-b border-[var(--border)]">
-                            <th className="py-2 pr-4">ID</th>
-                            <th className="py-2 pr-4">Montant</th>
-                            <th className="py-2 pr-4">Statut</th>
-                            <th className="py-2">Date</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {u.transactions.slice(0, 15).map((t) => (
-                            <tr key={t.id} className="border-b border-[var(--border)] last:border-0">
-                              <td className="py-2 pr-4 font-mono text-[var(--text-faint)]">#{t.id}</td>
-                              <td className="py-2 pr-4 font-medium text-[var(--text)]">{euros(t.amount_cents)}</td>
-                              <td className="py-2 pr-4"><StatusBadge status={t.status} /></td>
-                              <td className="py-2 text-[var(--text-muted)]">{dateFr(t.created_at)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="border-t border-border px-4 pt-4 pb-5 sm:px-5">
+                      <div className="mb-3 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                        <span>
+                          Volume encaissé : <span className="font-semibold text-foreground">{euros(vol)}</span>
+                        </span>
+                        <span>Inscrit le {dateFr(u.created_at)}</span>
+                      </div>
+                      {u.transactions.length === 0 ? (
+                        <p className="py-4 text-center text-sm text-subtle-foreground">Aucune transaction.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>Identifiant</TableHead>
+                              <TableHead className="text-right">Montant</TableHead>
+                              <TableHead>Statut</TableHead>
+                              <TableHead>Date</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {u.transactions.slice(0, 15).map((t) => (
+                              <TableRow key={t.id}>
+                                <TableCell className="font-mono text-subtle-foreground">#{t.id}</TableCell>
+                                <TableCell className="text-right font-mono font-semibold text-foreground tabular">{euros(t.amount_cents)}</TableCell>
+                                <TableCell><StatusBadge status={t.status} /></TableCell>
+                                <TableCell className="text-muted-foreground">{dateFr(t.created_at)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </Card>
           );
         })}

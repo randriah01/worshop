@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
+import { ShieldAlert, ShieldCheck, CircleDot, ChevronRight, Check, Radar } from "lucide-react";
 import { getIncidents } from "../api";
-import { Card, StatusBadge, Spinner, ErrorNote, StatCard, dateFr } from "../components/ui";
-import { Header } from "./Dashboard";
+import { dateFr } from "@/lib/format";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/app/page-header";
+import { StatCard } from "@/components/app/stat-card";
+import { StatusBadge } from "@/components/app/status-badge";
+import { ErrorNote, EmptyState } from "@/components/app/states";
+import { BorderBeam } from "@/components/magicui/border-beam";
+import { cn } from "@/lib/utils";
 
 // Gravité déduite du type d'incident (le backend ne la stocke pas encore).
 function severity(kind = "") {
@@ -26,20 +37,24 @@ function severity(kind = "") {
   return "information";
 }
 
-const SEV_STYLE = {
-  critique: "bg-red-500/15 text-red-400 border-red-500/30",
-  élevé: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  moyen: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  faible: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  information: "bg-slate-500/15 text-[var(--text-soft)] border-slate-500/30",
+const SEV_TONE = {
+  critique: "danger",
+  élevé: "orange",
+  moyen: "warning",
+  faible: "brand",
+  information: "neutral",
+};
+
+const SEV_BAR = {
+  critique: "bg-destructive",
+  élevé: "bg-orange-500",
+  moyen: "bg-warning",
+  faible: "bg-electric",
+  information: "bg-subtle-foreground",
 };
 
 function SevBadge({ level }) {
-  return (
-    <span className={"rounded-full border px-2.5 py-0.5 text-xs font-medium " + SEV_STYLE[level]}>
-      {level}
-    </span>
-  );
+  return <Badge tone={SEV_TONE[level]} className="capitalize">{level}</Badge>;
 }
 
 export default function Security() {
@@ -68,96 +83,141 @@ export default function Security() {
 
   return (
     <div className="space-y-6">
-      <Header title="Cybersécurité" subtitle="Supervision des incidents et anomalies" onRefresh={load} />
+      <PageHeader title="Cybersécurité" subtitle="Supervision des incidents et anomalies" onRefresh={load} refreshing={loading} />
 
-      <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Incidents" value={incidents.length} />
-        <StatCard label="Ouverts" value={openCount} hint="à traiter" hintColor={openCount ? "text-amber-400" : "text-[var(--text-muted)]"} />
-        <StatCard label="Résolus" value={resolved} hintColor="text-emerald-400" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Incidents" value={incidents.length} icon={ShieldAlert} />
+        <StatCard label="Ouverts" value={openCount} icon={CircleDot} hint="À traiter" hintTone={openCount ? "warning" : "muted"} />
+        <StatCard label="Résolus" value={resolved} icon={ShieldCheck} hint="Après vérification de santé" hintTone="success" />
       </div>
 
       <Card>
-        <h2 className="mb-4 font-medium text-[var(--text)]">Journal des incidents</h2>
-        {loading ? (
-          <Spinner />
-        ) : error ? (
-          <ErrorNote>{error}</ErrorNote>
-        ) : incidents.length === 0 ? (
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-2)] p-6 text-center text-sm text-[var(--text-muted)]">
-            Aucun incident pour le moment. Les incidents sont créés par la détection
-            et le moteur de remédiation (endpoint interne sécurisé).
+        <CardHeader>
+          <div>
+            <CardTitle>Journal des incidents</CardTitle>
+            <CardDescription>Cliquez sur un incident pour voir sa chronologie.</CardDescription>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {incidents.map((inc) => (
-              <button
-                key={inc.id}
-                onClick={() => setOpen(inc)}
-                className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-4 py-3 text-left transition hover:border-[var(--border-hover)]"
-              >
-                <span className="font-mono text-xs text-[var(--text-faint)]">#{inc.id}</span>
-                <SevBadge level={severity(inc.kind)} />
-                <span className="text-sm font-medium text-[var(--text)]">{inc.kind}</span>
-                <span className="flex-1 truncate text-sm text-[var(--text-faint)]">{inc.detail}</span>
-                <StatusBadge status={inc.status} />
-                <span className="text-xs text-[var(--text-faint)]">{dateFr(inc.created_at)}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        </CardHeader>
+        <CardContent>
+          {loading && incidents.length === 0 ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-16" />
+              ))}
+            </div>
+          ) : error ? (
+            <ErrorNote>{error}</ErrorNote>
+          ) : incidents.length === 0 ? (
+            <EmptyState icon={Radar} title="Aucun incident pour le moment">
+              Les incidents sont créés par la détection et le moteur de remédiation (endpoint interne sécurisé).
+            </EmptyState>
+          ) : (
+            <ul className="space-y-2">
+              {incidents.map((inc, i) => {
+                const level = severity(inc.kind);
+                const isOpen = inc.status === "open";
+                return (
+                  <motion.li
+                    key={inc.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.3 }}
+                  >
+                    <button
+                      onClick={() => setOpen(inc)}
+                      className="group relative flex w-full cursor-pointer items-center gap-4 overflow-hidden rounded-control border border-border bg-surface-2 py-3 pr-3 pl-5 text-left transition hover:border-input hover:bg-muted"
+                    >
+                      <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", SEV_BAR[level])} />
+                      {isOpen && <BorderBeam size={50} duration={5} colorFrom="#f5b33f" colorTo="#ff5876" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs text-subtle-foreground">#{inc.id}</span>
+                          <span className="font-semibold text-foreground">{inc.kind}</span>
+                          <SevBadge level={level} />
+                        </div>
+                        <p className="mt-0.5 truncate text-sm text-muted-foreground">{inc.detail || "Pas de détail fourni."}</p>
+                      </div>
+                      <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+                        <StatusBadge status={inc.status} />
+                        <span className="text-xs text-subtle-foreground">{dateFr(inc.created_at)}</span>
+                      </div>
+                      <div className="sm:hidden"><StatusBadge status={inc.status} /></div>
+                      <ChevronRight className="size-4 shrink-0 text-subtle-foreground transition group-hover:translate-x-0.5" aria-hidden="true" />
+                    </button>
+                  </motion.li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
       </Card>
 
-      {open && <IncidentTimeline inc={open} onClose={() => setOpen(null)} />}
+      <IncidentTimeline inc={open} onClose={() => setOpen(null)} />
     </div>
   );
 }
 
 function IncidentTimeline({ inc, onClose }) {
-  const resolved = inc.status === "resolved";
-  const steps = [
-    { t: "Apparition de l'anomalie", done: true, at: inc.created_at },
-    { t: "Détection", done: true, at: inc.created_at },
-    { t: "Qualification de l'incident", done: true },
-    { t: "Décision (règles de remédiation)", done: resolved, pending: !resolved },
-    { t: "Action de remédiation", done: resolved, pending: !resolved },
-    { t: "Vérification du rétablissement", done: resolved, pending: !resolved },
-  ];
+  const resolved = inc && inc.status === "resolved";
+  const steps = inc
+    ? [
+        { t: "Apparition de l'anomalie", done: true, at: inc.created_at },
+        { t: "Détection", done: true, at: inc.created_at },
+        { t: "Qualification de l'incident", done: true },
+        { t: "Décision (règles de remédiation)", done: resolved, pending: !resolved },
+        { t: "Action de remédiation", done: resolved, pending: !resolved },
+        { t: "Vérification du rétablissement", done: resolved, pending: !resolved },
+      ]
+    : [];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-lg rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 np-fade"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="font-semibold text-[var(--text)]">Incident #{inc.id} — {inc.kind}</h3>
-          <button onClick={onClose} className="text-[var(--text-faint)] hover:text-[var(--text-soft)]">✕</button>
-        </div>
-        <p className="mb-5 text-sm text-[var(--text-muted)]">{inc.detail || "Pas de détail fourni."}</p>
-
-        <ol className="space-y-4">
-          {steps.map((s, i) => (
-            <li key={i} className="flex gap-3">
-              <span
-                className={
-                  "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] " +
-                  (s.done
-                    ? "bg-emerald-500 text-white"
-                    : s.pending
-                      ? "border border-amber-500 text-amber-400"
-                      : "border border-slate-600 text-[var(--text-faint)]")
-                }
-              >
-                {s.done ? "✓" : i + 1}
-              </span>
-              <div>
-                <p className={"text-sm " + (s.done ? "text-[var(--text)]" : "text-[var(--text-muted)]")}>{s.t}</p>
-                {s.at && <p className="text-xs text-[var(--text-faint)]">{dateFr(s.at)}</p>}
-                {s.pending && <p className="text-xs text-amber-400/80">en attente du moteur de remédiation</p>}
+    <Dialog open={Boolean(inc)} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        {inc && (
+          <>
+            <DialogHeader>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <SevBadge level={severity(inc.kind)} />
+                <StatusBadge status={inc.status} />
               </div>
-            </li>
-          ))}
-        </ol>
-      </div>
-    </div>
+              <DialogTitle>
+                Incident #{inc.id} : {inc.kind}
+              </DialogTitle>
+              <DialogDescription>{inc.detail || "Pas de détail fourni."}</DialogDescription>
+            </DialogHeader>
+
+            <ol className="relative space-y-5 pl-1">
+              <span aria-hidden="true" className="absolute top-2 bottom-2 left-[13px] w-px bg-border" />
+              {steps.map((s, i) => (
+                <motion.li
+                  key={i}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.06 * i }}
+                  className="relative flex gap-3.5"
+                >
+                  <span
+                    className={cn(
+                      "relative z-10 mt-0.5 grid size-[26px] shrink-0 place-items-center rounded-full text-[11px] font-semibold",
+                      s.done
+                        ? "bg-success text-white"
+                        : s.pending
+                          ? "border-2 border-warning bg-popover text-warning"
+                          : "border border-border bg-popover text-subtle-foreground"
+                    )}
+                  >
+                    {s.done ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
+                  </span>
+                  <div>
+                    <p className={cn("text-sm font-medium", s.done ? "text-foreground" : "text-muted-foreground")}>{s.t}</p>
+                    {s.at && <p className="text-xs text-subtle-foreground">{dateFr(s.at)}</p>}
+                    {s.pending && <p className="text-xs text-warning">En attente du moteur de remédiation</p>}
+                  </div>
+                </motion.li>
+              ))}
+            </ol>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
