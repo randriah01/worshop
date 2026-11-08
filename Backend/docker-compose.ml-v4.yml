@@ -1,0 +1,15 @@
+services:
+  ml-detector-v4:
+    image: novapay-ml-detector
+    pull_policy: never
+    container_name: novapay-ml-v4
+    command: ["python", "-u", "app/detector_v4.py", "--samples", "0", "--interval", "5"]
+    environment:
+      PAYMENT_API: http://payment-api:8080
+      ML_V4_MODEL_PATH: /models/novapay_iforest_v4_candidate.joblib
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./services/ml-detector/app:/app/app:ro
+      - ./services/ml-detector/models:/models:ro
+    networks: [novapay]
+    restart: unless-stopped

@@ -33,3 +33,4 @@ Thumbs.db
 .vscode/
 *.swp
 .claude/
+/Backend/services/ml-detector/models/
