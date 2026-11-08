@@ -154,7 +154,6 @@ services:
     container_name: novapay-ml
     environment:
       PAYMENT_API: http://payment-api:8080
-      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
     depends_on:
       - payment-api
     networks: [novapay]

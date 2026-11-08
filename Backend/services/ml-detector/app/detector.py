@@ -1,147 +1,103 @@
+"""NovaPay ML V3 — Isolation Forest en MODE SHADOW EXCLUSIF.
+
+Le détecteur ne possède volontairement aucun appel POST, aucune décision SOAR,
+aucune interface d'exécution. Il publie des scores JSON dans stdout.
 """
-ml-detector — Détection d'anomalies pour NovaPay (pilier IA / Data).
+from __future__ import annotations
 
-Principe : le détecteur interroge en continu les métriques de payment-api
-(/metrics), apprend un comportement de référence (débit de requêtes normal),
-et signale une anomalie quand le trafic ou les erreurs s'écartent nettement de
-cette référence. La détection n'est PAS une simple règle fixe : elle repose sur
-une référence glissante (moyenne + écart-type) et un score d'écart (z-score),
-complétée par des seuils métier (taux d'erreur, disponibilité).
-
-Quand une anomalie est détectée, le détecteur crée un incident via l'API
-interne (POST /incidents, protégé par un jeton). Il ne répare rien : la
-remédiation est un composant séparé.
-"""
-
+import json
 import os
 import time
-import math
-import statistics
-from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
+from ml_core import feature_window, load_model, parse_prometheus, score_model
 
-PAYMENT_API = os.getenv("PAYMENT_API", "http://payment-api:8080")
-INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "internal-dev-token")
-POLL = float(os.getenv("DETECTOR_POLL_SECONDS", "5"))
-
-# Paramètres de la détection statistique.
-BASELINE_WINDOW = int(os.getenv("DETECTOR_WINDOW", "20"))   # nb d'échantillons de référence
-MIN_SAMPLES = int(os.getenv("DETECTOR_MIN_SAMPLES", "5"))    # avant de pouvoir juger
-Z_THRESHOLD = float(os.getenv("DETECTOR_Z", "3.0"))         # écart-types pour un pic
-MIN_SPIKE_RATE = float(os.getenv("DETECTOR_MIN_RATE", "15"))  # req/s minimum pour parler de pic
-ERR_RATIO = float(os.getenv("DETECTOR_ERR_RATIO", "0.30"))  # part d'erreurs 5xx
-COOLDOWN = float(os.getenv("DETECTOR_COOLDOWN", "45"))      # s entre deux incidents
+PAYMENT_API = os.getenv("PAYMENT_API", "http://payment-api:8080").rstrip("/")
+POLL = max(1.0, float(os.getenv("DETECTOR_POLL_SECONDS", "5")))
+MODEL_PATH = os.getenv("ML_MODEL_PATH", "/tmp/novapay_iforest.joblib")
+MODEL_RELOAD_SECONDS = max(5.0, float(os.getenv("ML_RELOAD_SECONDS", "15")))
+VERSION = "NOVAPAY_ML_IFOREST_SHADOW_V3"
 
 
-def log(msg):
-    print(f"[ml-detector] {msg}", flush=True)
+def log(event: str, **fields) -> None:
+    print(json.dumps({
+        "component": "ml-detector",
+        "version": VERSION,
+        "mode": "SHADOW_ONLY",
+        "event": event,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **fields,
+    }, ensure_ascii=False, sort_keys=True), flush=True)
 
 
-def fetch_metrics():
-    """Récupère et additionne les métriques utiles de payment-api."""
+def metrics() -> tuple[float, float, float]:
     r = requests.get(f"{PAYMENT_API}/metrics", timeout=4)
     r.raise_for_status()
-    total = 0.0
-    errors = 0.0
-    db_up = 1.0
-    for line in r.text.splitlines():
-        if line.startswith("novapay_http_requests_total{"):
-            try:
-                value = float(line.rsplit(" ", 1)[1])
-            except (ValueError, IndexError):
-                continue
-            total += value
-            # status="5xx" = erreur serveur
-            if 'status="5' in line:
-                errors += value
-        elif line.startswith("novapay_db_up "):
-            try:
-                db_up = float(line.rsplit(" ", 1)[1])
-            except (ValueError, IndexError):
-                pass
-    return total, errors, db_up
+    return parse_prometheus(r.text)
 
 
-def create_incident(kind, detail):
-    try:
-        requests.post(
-            f"{PAYMENT_API}/incidents",
-            json={"kind": kind, "detail": detail},
-            headers={"X-Internal-Token": INTERNAL_TOKEN},
-            timeout=4,
-        )
-        log(f"INCIDENT créé → {kind} : {detail}")
-    except Exception as e:
-        log(f"Échec création incident : {e}")
-
-
-def main():
-    log(f"Démarrage. Cible={PAYMENT_API}, intervalle={POLL}s")
-    baseline = deque(maxlen=BASELINE_WINDOW)
-    prev_total = prev_errors = None
-    active = False          # une anomalie est-elle en cours ?
-    last_incident = 0.0     # horodatage du dernier incident
-
+def main() -> None:
+    log("startup", model_path=MODEL_PATH, incident_writes=False, remediation_actions=False)
+    previous = None
+    previous_at = None
+    loaded = None
+    loaded_mtime = None
+    last_reload = 0.0
+    last_warning = 0.0
+    consecutive = 0
     while True:
         time.sleep(POLL)
-        now = time.time()
-
-        # 1) Récupérer les métriques (échec = API injoignable).
+        now = time.monotonic()
+        if now - last_reload >= MODEL_RELOAD_SECONDS:
+            last_reload = now
+            try:
+                mtime = Path(MODEL_PATH).stat().st_mtime_ns
+                if loaded is None or loaded_mtime != mtime:
+                    loaded = load_model(MODEL_PATH)
+                    loaded_mtime = mtime
+                    consecutive = 0
+                    log("model_loaded", model_version=loaded["version"], features=list(loaded["features"]), baseline_sha256=loaded.get("baseline_sha256"))
+            except FileNotFoundError:
+                if now - last_warning > 60:
+                    log("awaiting_approved_baseline_model", message="Aucun score jusqu'à l'entraînement d'une baseline saine")
+                    last_warning = now
+            except Exception as exc:
+                loaded = None
+                log("model_load_error", error=str(exc)[:180])
         try:
-            total, errors, db_up = fetch_metrics()
-        except Exception:
-            if now - last_incident > COOLDOWN:
-                create_incident("Indisponibilité de l'API", "L'API de paiement ne répond plus (timeout).")
-                last_incident = now
-                active = True
+            current = metrics()
+        except Exception as exc:
+            previous = previous_at = None
+            consecutive = 0
+            log("metrics_unavailable", error=str(exc)[:180], incident_writes=False)
             continue
-
-        if prev_total is None:
-            prev_total, prev_errors = total, errors
+        if previous is None:
+            previous, previous_at = current, now
             continue
-
-        # 2) Calculer débit et taux d'erreur sur l'intervalle.
-        d_req = max(total - prev_total, 0.0)
-        d_err = max(errors - prev_errors, 0.0)
-        prev_total, prev_errors = total, errors
-        rate = d_req / POLL
-        err_ratio = (d_err / d_req) if d_req > 0 else 0.0
-
-        # 3) Décider s'il y a anomalie.
-        reason = None
-        if db_up < 1.0:
-            reason = ("Base de données indisponible", "La base ne répond plus (novapay_db_up=0).")
-        elif d_req >= 5 and err_ratio >= ERR_RATIO:
-            reason = ("Hausse des erreurs (5xx)", f"Taux d'erreur {err_ratio*100:.0f}% sur {int(d_req)} requêtes.")
-        elif len(baseline) >= MIN_SAMPLES and rate >= MIN_SPIKE_RATE:
-            mean = statistics.fmean(baseline)
-            std = statistics.pstdev(baseline) or 1.0
-            z = (rate - mean) / std
-            if z >= Z_THRESHOLD:
-                reason = (
-                    "Pic de trafic — déni de service",
-                    f"Débit {rate:.0f} req/s (référence {mean:.0f}, écart {z:.1f}σ).",
-                )
-
-        # 4) Mettre à jour la référence UNIQUEMENT en période normale,
-        #    pour que l'attaque ne "pollue" pas le comportement de référence.
-        if reason is None:
-            baseline.append(rate)
-
-        # 5) Créer un incident à l'apparition de l'anomalie (avec anti-spam).
-        if reason:
-            if not active or (now - last_incident > COOLDOWN):
-                create_incident(*reason)
-                last_incident = now
-            active = True
-        else:
-            if active:
-                log("Retour à la normale.")
-            active = False
-
-        log(f"rate={rate:.1f} req/s err={err_ratio*100:.0f}% db_up={db_up:.0f} "
-            f"baseline={len(baseline)} {'ANOMALIE' if reason else 'ok'}")
+        try:
+            features = feature_window(previous, current, now - previous_at)
+        except ValueError as exc:
+            log("invalid_window", error=str(exc))
+            previous, previous_at = current, now
+            continue
+        previous, previous_at = current, now
+        if loaded is None:
+            # Ne pas remplir une baseline implicitement : elle doit être capturée
+            # puis validée manuellement dans un environnement autorisé.
+            if now - last_warning > 60:
+                log("waiting_for_model", features=features)
+                last_warning = now
+            continue
+        try:
+            result = score_model(loaded, features)
+        except Exception as exc:
+            log("score_error", error=str(exc)[:180])
+            continue
+        consecutive = consecutive + 1 if result["anomaly"] else 0
+        log("ml_score", features=features, **result, consecutive_anomalies=consecutive,
+            suggest_review=consecutive >= 3, incident_writes=False, remediation_actions=False)
 
 
 if __name__ == "__main__":
