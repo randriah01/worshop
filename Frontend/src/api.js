@@ -127,10 +127,10 @@ export function getTransactions({ limit = 50, offset = 0, status } = {}) {
   return request(`/api/transactions?${params.toString()}`);
 }
 
-export function createTransaction(amountCents, idempotencyKey) {
+export function createTransaction(amountCents, idempotencyKey, simulateDecline = false) {
   return request("/api/transactions", {
     method: "POST",
-    body: { amount_cents: amountCents },
+    body: { amount_cents: amountCents, simulate_decline: simulateDecline },
     extraHeaders: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
   });
 }

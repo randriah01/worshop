@@ -1,6 +1,7 @@
 import json
 import time
 import logging
+import os
 
 import psycopg2
 from fastapi import FastAPI, Depends, HTTPException, Request, Header, Query
@@ -114,6 +115,8 @@ def create_tx(
     commerçant, on renvoie la transaction existante sans en créer une nouvelle
     ni recréditer le solde (protège contre les doublons en cas de renvoi)."""
     merchant_id = user["merchant_id"]
+    if tx.simulate_decline and os.getenv("NOVAPAY_DEMO_DECLINES", "false").lower() not in ("true", "1", "yes", "on"):
+        raise HTTPException(status_code=403, detail="Simulation de refus desactivee")
     conn = db.get_conn()
     try:
         cur = conn.cursor()
@@ -130,7 +133,24 @@ def create_tx(
                     "idempotent_replay": True,
                 }
 
-        # 2) Traitement normal : crédit du solde + enregistrement, atomiques.
+        # 2) Refus bancaire SIMULE (uniquement si le mode demo est active).
+        # Aucun credit: seul le statut 'rejected' est enregistre, pour l'historique
+        # et les voyants ESP32. L'index idempotent evite les doublons.
+        if tx.simulate_decline:
+            cur.execute(
+                "INSERT INTO transactions (merchant_id, amount_cents, status, idempotency_key) "
+                "VALUES (%s, %s, 'rejected', %s) RETURNING id",
+                (merchant_id, tx.amount_cents, idempotency_key),
+            )
+            tx_id = cur.fetchone()[0]
+            balance = _balance(cur, merchant_id)
+            conn.commit()
+            cur.close()
+            TX.labels("rejected").inc()
+            return {"id": tx_id, "status": "rejected", "merchant_id": merchant_id,
+                    "new_balance_cents": balance, "simulated": True}
+
+        # 3) Traitement normal : crédit du solde + enregistrement, atomiques.
         cur.execute(
             "UPDATE merchants SET balance_cents = balance_cents + %s "
             "WHERE id = %s RETURNING balance_cents",

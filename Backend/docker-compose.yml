@@ -23,6 +23,14 @@ services:
       - payment-api
       - auth-service
     networks: [novapay]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null http://127.0.0.1:8080/api/health"
+      interval: 30s
+      timeout: 7s
+      retries: 3
+      start_period: 30s
 
   # --- Développement : SI de paiement ---
   # Dashboard React (dossier ../Frontend), construit puis servi par nginx.
@@ -43,6 +51,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       FACE_LOGIN_REQUIRED: ${FACE_LOGIN_REQUIRED:-false}
+      NOVAPAY_DEMO_DECLINES: ${NOVAPAY_DEMO_DECLINES:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,9 +172,6 @@ services:
       TARGET_CONTAINER: novapay-payment-api
       WAF_CONTAINER: novapay-waf
       WAF_DYNAMIC_DIR: /waf-dynamic
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - waf_dynamic:/waf-dynamic
     depends_on:
       - payment-api
       - waf

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class TxIn(BaseModel):
     amount_cents: int = Field(gt=0, description="Montant en centimes, strictement positif")
+    simulate_decline: bool = Field(default=False, description="Refus bancaire fictif, mode demonstration uniquement")
 
 
 class IncidentIn(BaseModel):

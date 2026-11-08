@@ -273,6 +273,7 @@ function newKey() {
 function Checkout({ onPaid }) {
 
   const [amount, setAmount] = useState("24.90");
+  const [simulateDecline, setSimulateDecline] = useState(false);
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
   const [expiry, setExpiry] = useState("");
@@ -285,7 +286,7 @@ function Checkout({ onPaid }) {
   const [idemKey, setIdemKey] = useState(() => newKey());
   const [retryInfo, setRetryInfo] = useState(null); // { n } pendant une relance auto
   const cancelRef = useRef(false);
-  const keyCents = useRef(null); // montant associé à la clé courante
+  const keyRequestRef = useRef(null); // montant + type de simulation associes a la cle
 
   const brand = cardBrand(number);
   const cents = Math.round(parseFloat((amount || "").replace(",", ".")) * 100);
@@ -318,11 +319,12 @@ function Checkout({ onPaid }) {
     // Même clé pour tous les envois d'UN paiement ; si le montant change, c'est
     // un autre paiement → nouvelle clé (sinon le serveur renverrait l'ancien).
     let key = idemKey;
-    if (keyCents.current !== null && keyCents.current !== cents) {
+    const requestSignature = `${cents}:${simulateDecline}`;
+    if (keyRequestRef.current !== null && keyRequestRef.current !== requestSignature) {
       key = newKey();
       setIdemKey(key);
     }
-    keyCents.current = cents;
+    keyRequestRef.current = requestSignature;
 
     // Petit délai pour simuler le traitement par la banque.
     await new Promise((r) => setTimeout(r, 1000));
@@ -342,7 +344,17 @@ function Checkout({ onPaid }) {
     };
     for (let attempt = 0; ; attempt++) {
       try {
-        const r = await createTransaction(cents, key);
+        const r = await createTransaction(cents, key, simulateDecline);
+        if (r.status === "rejected") {
+          setResult({ ...r, reason: "Refus bancaire simulé pour la démonstration NovaPay.", retried: attempt });
+          setStage("declined");
+          setRetryInfo(null);
+          onPaid(); // Rafraichir l'historique, qui contient desormais le refus.
+          return;
+        }
+        if (r.status !== "validated") {
+          return fail(`Paiement non validé (statut : ${r.status || "inconnu"}).`, attempt);
+        }
         setResult({ ...r, retried: attempt });
         setStage("success");
         setRetryInfo(null);
@@ -362,6 +374,12 @@ function Checkout({ onPaid }) {
   // Retour au formulaire en CONSERVANT la saisie et la clé d'idempotence :
   // un refus peut cacher un paiement passé, une nouvelle clé risquerait un doublon.
   function backToForm() {
+    // Un refus explicite est definitif ; un NOUVEL essai doit avoir une nouvelle cle.
+    // Pour une erreur reseau ambiguë, conserver la meme cle evite les doublons.
+    if (result?.status === "rejected") {
+      setIdemKey(newKey());
+      keyRequestRef.current = null;
+    }
     setResult(null);
     setStage("form");
   }
@@ -374,7 +392,8 @@ function Checkout({ onPaid }) {
     setErrors({});
     setResult(null);
     setStage("form");
-    keyCents.current = null;
+    keyRequestRef.current = null;
+    setSimulateDecline(false);
     setIdemKey(newKey()); // nouveau paiement = nouvelle clé
   }
 
@@ -575,6 +594,16 @@ function Checkout({ onPaid }) {
                     />
                   </Field>
                 </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={simulateDecline}
+                    onChange={(e) => setSimulateDecline(e.target.checked)}
+                    className="size-4 accent-red-600"
+                  />
+                  <span><strong>Simuler un refus</strong> — démonstration ESP32 (aucun paiement réel).</span>
+                </label>
 
                 <ShimmerButton type="submit" className="mt-2 h-12 w-full">
                   <Lock /> Payer {cents > 0 ? euros(cents) : ""}
