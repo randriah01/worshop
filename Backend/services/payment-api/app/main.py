@@ -2,6 +2,7 @@ import json
 import time
 import logging
 import os
+import secrets
 
 import psycopg2
 from fastapi import FastAPI, Depends, HTTPException, Request, Header, Query
@@ -342,6 +343,59 @@ def list_incidents():
             }
             for r in rows
         ]
+    finally:
+        db.put_conn(conn)
+
+
+
+@app.get("/internal/incidents/open")
+def list_open_incidents_internal(
+    limit: int = Query(100, ge=1, le=200),
+    cursor: int | None = Query(default=None, ge=1),
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    """Lecture interne, paginée par identifiant, des incidents ouverts.
+
+    Aucune modification d'état et aucun risque de manquer un incident ouvert
+    uniquement parce que plus de 50 incidents résolus sont plus récents.
+    Le jeton n'est jamais inclus dans les réponses ou les journaux.
+    """
+    configured_token = config.INTERNAL_TOKEN
+    if (not configured_token or not x_internal_token or
+            not secrets.compare_digest(x_internal_token, configured_token)):
+        raise HTTPException(status_code=403, detail="Accès interne requis")
+
+    conn = db.get_conn()
+    try:
+        cur = conn.cursor()
+        statement = (
+            "SELECT id, kind, detail, status, action, attempts, created_at, resolved_at "
+            "FROM incidents WHERE status = 'open' "
+        )
+        params = []
+        if cursor is not None:
+            statement += "AND id < %s "
+            params.append(cursor)
+        statement += "ORDER BY id DESC LIMIT %s"
+        params.append(limit + 1)
+        cur.execute(statement, tuple(params))
+        rows = cur.fetchall()
+        cur.close()
+
+        page = rows[:limit]
+        has_more = len(rows) > limit
+        return {
+            "items": [
+                {
+                    "id": r[0], "kind": r[1], "detail": r[2],
+                    "status": r[3], "action": r[4], "attempts": r[5],
+                    "created_at": r[6].isoformat() if r[6] else None,
+                    "resolved_at": r[7].isoformat() if r[7] else None,
+                }
+                for r in page
+            ],
+            "next_cursor": page[-1][0] if has_more else None,
+        }
     finally:
         db.put_conn(conn)
 

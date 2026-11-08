@@ -11,6 +11,10 @@ server {
 
     # Délais courts : si l'API est saturée, le client reçoit vite une erreur et
     # peut réessayer (au lieu d'attendre 60 s un 504).
+    # La consultation interne des incidents est accessible uniquement
+    # entre conteneurs via payment-api:8080. Aucune exposition sur le WAF.
+    location ^~ /api/internal/ { return 404; }
+
     location /api/  {
         proxy_pass http://payment-api:8080/;
         proxy_connect_timeout 5s;

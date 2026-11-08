@@ -15,10 +15,13 @@ from datetime import datetime, timezone
 
 import requests
 
-VERSION = "NOVAPAY_SOAR_OBSERVE_ONLY_V1"
+VERSION = "NOVAPAY_SOAR_OBSERVE_ONLY_V2"
 PAYMENT_API = os.getenv("PAYMENT_API", "http://payment-api:8080").rstrip("/")
 POLL_SECONDS = max(5.0, float(os.getenv("REMEDIATION_POLL_SECONDS", "10")))
 MAX_TRACKED = 2000
+PAGE_SIZE = 100
+MAX_PAGES = 100
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 
 
 def event(name, **fields):
@@ -47,12 +50,48 @@ def classify(incident):
 
 
 def get_incidents(session):
-    resp = session.get(f"{PAYMENT_API}/incidents", timeout=5)
-    resp.raise_for_status()
-    data = resp.json()
-    if not isinstance(data, list):
-        raise ValueError("Réponse incidents invalide (liste attendue)")
-    return data
+    """Collecte TOUS les incidents ouverts via une API interne paginée.
+
+    Un incident ouvert plus ancien que les 50 derniers reste accessible.
+    Erreur explicite (sans action) si la pagination devient incohérente.
+    """
+    if not INTERNAL_TOKEN:
+        raise ValueError("INTERNAL_TOKEN manquant : refus de lecture interne")
+    incidents = []
+    cursor = None
+    used_cursors = set()
+    for page_number in range(MAX_PAGES):
+        params = {"limit": PAGE_SIZE}
+        if cursor is not None:
+            params["cursor"] = cursor
+        resp = session.get(
+            f"{PAYMENT_API}/internal/incidents/open",
+            headers={"X-Internal-Token": INTERNAL_TOKEN},
+            params=params,
+            timeout=5,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise ValueError("Pagination interne invalide : items manquant")
+        batch = payload["items"]
+        if len(batch) > PAGE_SIZE or any(
+            not isinstance(inc, dict) or inc.get("status") != "open" or
+            not isinstance(inc.get("id"), int) for inc in batch
+        ):
+            raise ValueError("Pagination interne invalide : incident ou taille")
+        incidents.extend(batch)
+        next_cursor = payload.get("next_cursor")
+        if next_cursor is None:
+            return incidents
+        if (not batch or not isinstance(next_cursor, int) or
+                next_cursor != batch[-1]["id"] or
+                next_cursor in used_cursors or
+                (cursor is not None and next_cursor >= cursor)):
+            raise ValueError("Pagination interne invalide : curseur incohérent")
+        used_cursors.add(next_cursor)
+        cursor = next_cursor
+    raise ValueError(f"Pagination incomplète après {MAX_PAGES} pages")
 
 
 def get_api_health(session):
@@ -83,9 +122,6 @@ def analyze(incident, api_healthy):
 
 def run_cycle(session, seen):
     incidents = get_incidents(session)
-    if len(incidents) >= 50:
-        event("pagination_limit_warning", count=len(incidents),
-              warning="L'API /incidents expose les 50 plus récents, risque d'anciens incidents non visibles")
     api_healthy = get_api_health(session)
     for inc in incidents:
         if not isinstance(inc, dict) or inc.get("status") != "open":
@@ -103,7 +139,8 @@ def main():
     # Le moteur refuse explicitement d'interpréter les anciens paramètres comme
     # une autorisation de remédiation, même si le socket Docker reste monté.
     event("startup", mode="OBSERVE_ONLY", docker_actions=False,
-          writes_to_api=False, target=PAYMENT_API)
+          writes_to_api=False, target=PAYMENT_API,
+          incident_source="/internal/incidents/open")
     seen = set()
     with requests.Session() as session:
         while True:
